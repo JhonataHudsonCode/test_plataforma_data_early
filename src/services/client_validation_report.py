@@ -304,3 +304,99 @@ class ClientValidationReport:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(html, encoding="utf-8")
         return html
+
+    @staticmethod
+    def email_html_from_text(report_path: str | Path) -> str:
+        """Gera HTML compatível com clientes de e-mail a partir do relatório TXT."""
+        report = Path(report_path).read_text(encoding="utf-8")
+        lines = report.splitlines()
+        test_name = next(
+            (line.removeprefix("Teste: ").strip() for line in lines if line.startswith("Teste:")),
+            "Relatório de validação",
+        )
+        environment = next(
+            (
+                line.removeprefix("Ambiente: ").strip()
+                for line in lines
+                if line.startswith("Ambiente:")
+            ),
+            os.getenv("TEST_ENV", "hml").strip().lower(),
+        )
+
+        sections: dict[str, list[tuple[str, list[str]]]] = {
+            "Falhas": [],
+            "Informativos": [],
+            "Aprovados": [],
+        }
+        current_section: str | None = None
+        for line in lines:
+            if line.startswith("Falhas ("):
+                current_section = "Falhas"
+            elif line.startswith("Informativos ("):
+                current_section = "Informativos"
+            elif line.startswith("Aprovados ("):
+                current_section = "Aprovados"
+            elif current_section and line.startswith("- Cliente: "):
+                sections[current_section].append(
+                    (line.removeprefix("- Cliente: ").strip(), [])
+                )
+            elif current_section and sections[current_section] and line.startswith("  "):
+                sections[current_section][-1][1].append(line.strip())
+
+        def render_section(name: str, color: str, background: str) -> str:
+            clients = sections[name]
+            rows = []
+            for client, details in clients:
+                detail_html = "".join(
+                    f'<li style="margin:4px 0;">{escape(detail)}</li>'
+                    for detail in details
+                ) or '<li style="margin:4px 0;">Sem detalhes adicionais.</li>'
+                rows.append(
+                    f'<tr><td style="padding:14px 16px;border:1px solid #dfe5ea;'
+                    f'border-left:4px solid {color};background:{background};">'
+                    f'<strong>{escape(client)}</strong><ul style="margin:8px 0 0;padding-left:20px;">'
+                    f'{detail_html}</ul></td></tr>'
+                )
+            content = "".join(rows) or (
+                '<tr><td style="padding:14px 16px;border:1px solid #dfe5ea;color:#64717d;">'
+                'Nenhum registro.</td></tr>'
+            )
+            return (
+                f'<h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">'
+                f'{name} ({len(clients)})</h2>'
+                f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
+                f'style="border-collapse:collapse;">{content}</table>'
+            )
+
+        metrics = (
+            ("Falhas", "#b42318", "#fff1f0"),
+            ("Informativos", "#9a6700", "#fff8e6"),
+            ("Aprovados", "#16734a", "#edf9f2"),
+        )
+        metric_cells = "".join(
+            f'<td width="33%" style="padding:14px 12px;border-top:4px solid {color};'
+            f'background:{background};font-family:Arial,sans-serif;">'
+            f'<div style="font-size:12px;font-weight:bold;color:#64717d;text-transform:uppercase;">{name}</div>'
+            f'<div style="font-size:30px;font-weight:bold;color:{color};margin-top:4px;">'
+            f'{len(sections[name])}</div></td>'
+            for name, color, background in metrics
+        )
+        generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+        return f"""<!doctype html>
+<html lang="pt-BR"><body style="margin:0;padding:0;background:#eef2f5;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2f5;"><tr><td style="padding:24px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px;margin:0 auto;background:#ffffff;">
+      <tr><td style="padding:28px 30px;background:#18324a;font-family:Arial,sans-serif;color:#ffffff;">
+        <div style="font-size:11px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;color:#b9c9d7;">Relatório de validação por cliente</div>
+        <h1 style="font-size:27px;line-height:1.2;margin:9px 0 10px;color:#ffffff;">{escape(test_name)}</h1>
+        <p style="margin:0;color:#d7e2eb;">Ambiente: <strong>{escape(environment)}</strong> &middot; Gerado em {generated_at}</p>
+      </td></tr>
+      <tr><td style="padding:20px 22px;">
+        <table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metric_cells}</tr></table>
+        {render_section("Falhas", "#b42318", "#fff1f0")}
+        {render_section("Informativos", "#9a6700", "#fff8e6")}
+        {render_section("Aprovados", "#16734a", "#edf9f2")}
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>"""

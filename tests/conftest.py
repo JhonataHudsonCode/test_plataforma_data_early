@@ -65,15 +65,16 @@ def pytest_sessionfinish(session, exitstatus):
         for report_path in report_paths:
             html_report_path = report_path.with_suffix(".html")
             body = report_path.read_text(encoding="utf-8")
-            html_body = ClientValidationReport.write_html_from_text(
+            ClientValidationReport.write_html_from_text(
                 report_path,
                 html_report_path,
             )
+            email_html = ClientValidationReport.email_html_from_text(report_path)
             subject = f"Relatório de Testes - {report_path.stem}"
             email_sent = email_service.send_email(
                 subject,
                 body,
-                html_body=html_body,
+                html_body=email_html,
             )
             if email_sent:
                 print(f"Relatório aceito pelo servidor SMTP: {report_path.name}")
@@ -255,4 +256,3 @@ def opensearch_dashboards_repository(
     opensearch_dashboards_connection: OpenSearchDashboardsConnection,
 ) -> OpenSearchDashboardsRepository:
     return OpenSearchDashboardsRepository(opensearch_dashboards_connection)
-

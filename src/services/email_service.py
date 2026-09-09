@@ -5,7 +5,6 @@ from html import escape
 from email.message import EmailMessage
 from datetime import datetime
 from pathlib import Path
-from src.services.allure_service import AllureService
 
 from dotenv import load_dotenv
 
@@ -106,9 +105,6 @@ class EmailService:
     ) -> bool:
 
         msg = EmailMessage()
-        allure_service = AllureService()
-        html_table = allure_service.generate_html_table()
-
         msg["To"] = self.smtp_recipents
         msg["From"] = self.smtp_from
         msg["Subject"] = subject
@@ -119,7 +115,7 @@ class EmailService:
             f"{escape(body)}</pre>"
         )
         msg.add_alternative(
-            report_html + html_table,
+            report_html,
             subtype="html"
         )
 
