@@ -322,6 +322,15 @@ class ClientValidationReport:
             ),
             os.getenv("TEST_ENV", "hml").strip().lower(),
         )
+        bdd_start = lines.index("BDD:") + 1 if "BDD:" in lines else None
+        bdd_lines: list[str] = []
+        if bdd_start is not None:
+            for line in lines[bdd_start:]:
+                if line == "" and bdd_lines:
+                    break
+                if line:
+                    bdd_lines.append(line)
+        bdd_html = "<br>".join(escape(line) for line in bdd_lines) or "BDD não encontrado."
 
         sections: dict[str, list[tuple[str, list[str]]]] = {
             "Falhas": [],
@@ -393,6 +402,10 @@ class ClientValidationReport:
       </td></tr>
       <tr><td style="padding:20px 22px;">
         <table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metric_cells}</tr></table>
+        <h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">BDD executado</h2>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;"><tr>
+          <td style="padding:14px 16px;border:1px solid #dfe5ea;border-left:4px solid #7591a7;background:#f7f9fb;font:14px/1.5 Arial,sans-serif;color:#34495a;">{bdd_html}</td>
+        </tr></table>
         {render_section("Falhas", "#b42318", "#fff1f0")}
         {render_section("Informativos", "#9a6700", "#fff8e6")}
         {render_section("Aprovados", "#16734a", "#edf9f2")}
