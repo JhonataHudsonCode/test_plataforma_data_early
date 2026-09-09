@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from src.connections.opensearch_factory import OpenSearchConnectionFactory
 from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.models.opensearch_client.opensearch_index_metadata import OpenSearchIndexMetadata
@@ -18,12 +18,11 @@ class OpenSearchClientRepository:
     def __init__(self, connection_factory: OpenSearchConnectionFactory) -> None:
         self._connection_factory = connection_factory
 
-    def get_indices_rsa_today(
+    def get_indices_rsa(
         self,
         client_host: str,
-        reference_date: date,
+        index_name: str,
     ) -> list[VulnerabilityIndex]:
-        index_name = f"rsa-{reference_date.strftime('%Y.%m.%d')}"
         connection = self._connection_factory.create_for_host(client_host)
 
         try:
@@ -33,7 +32,7 @@ class OpenSearchClientRepository:
                 client_host,
             )
             indices = connection.client.cat.indices(
-                index="rsa-*",
+                index=index_name,
                 format="json",
                 h="index,docs.count",
                 expand_wildcards="all"
@@ -115,9 +114,8 @@ class OpenSearchClientRepository:
                     },
                 )
 
-                print("RESPONSE", response)
             finally:
-                connection.close
+                connection.close()
 
             return response['hits']['hits']
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
+RSA_INDEX_NAME = "rsa"
+
+
 EXPECTED_RSA_MAPPING: dict[str, str | dict[str, Any]] = {
     "@timestamp": "date",
     "@version": "text",

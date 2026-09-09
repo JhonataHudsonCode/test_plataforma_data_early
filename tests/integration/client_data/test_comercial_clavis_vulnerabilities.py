@@ -14,7 +14,10 @@ from src.repositories.opensearch_client_rsa_repository import (
     OpenSearchClientRepository,
 )
 from src.models.opensearch_client.rules_mapping import EXPECTED_RULES_MAPPING, RULES_INDEX_NAME
-from src.models.opensearch_client.rsa_mapping import EXPECTED_RSA_MAPPING
+from src.models.opensearch_client.rsa_mapping import (
+    EXPECTED_RSA_MAPPING,
+    RSA_INDEX_NAME,
+)
 from src.models.opensearch_client.elastalert_status_mapping import EXPECTED_ELASTALERT_STATUS_MAPPING, ELASTALERT_STATUS_INDEX_NAME
 from src.models.opensearch_product.vulnerability_vm import EXPECTED_VULNERABILITIES_VM_MAPPING, VULNERABILITY_VM_INDEX_NAME
 from src.models.opensearch_product.vulnerability_vm_new_mapping import EXPECTED_VULNERABILITY_VM_NEW_MAPPING, VULNERABILITY_VM_NEW_INDEX_NAME
@@ -96,25 +99,38 @@ def test_should_validate_has_rsa_opensearch_client(
             )
             continue
         try:
-            expected_index_name = f"rsa-{today.strftime('%Y.%m.%d')}"
             host = target.host or client["octopus_endpoint"].replace("https://", "")
-            indices = client_repository.get_indices_rsa_today(host, today)
-            if expected_index_name not in {index.name for index in indices}:
+            indices = client_repository.get_indices_rsa(host, RSA_INDEX_NAME)
+            index = {item.name: item for item in indices}.get(RSA_INDEX_NAME)
+            if index is None:
                 failures.append(
                     f"Cliente '{target.client_id}' | host '{host}' | índice RSA "
-                    f"'{expected_index_name}' não encontrado. Índices encontrados: "
+                    f"'{RSA_INDEX_NAME}' não encontrado. Índices encontrados: "
                     f"{', '.join(index.name for index in indices) or 'nenhum'}."
                 )
-            metadata = client_repository.get_index_metadata(host, expected_index_name)
-            if metadata.created_at.date() != today:
-                failures.append(
-                    f"Cliente '{target.client_id}' | índice RSA '{expected_index_name}' "
-                    f"foi criado em '{metadata.created_at:%Y-%m-%d}', mas era esperada "
-                    f"a data '{today:%Y-%m-%d}'. Host: '{host}'."
+                report.add_client_result(target.client_id, failures)
+                continue
+
+            documents = client_repository.get_documents(
+                host,
+                RSA_INDEX_NAME,
+                size=index.document_count,
+            )
+            has_document_from_today = any(
+                str(document.get("_source", {}).get("scan_date", "")).startswith(
+                    today.isoformat()
                 )
+                for document in documents
+            )
+            if not has_document_from_today:
+                failures.append(
+                    f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' | "
+                    f"nenhum documento possui scan_date em '{today:%Y-%m-%d}'."
+                )
+            metadata = client_repository.get_index_metadata(host, RSA_INDEX_NAME)
             if not metadata.mapping:
                 failures.append(
-                    f"Cliente '{target.client_id}' | índice RSA '{expected_index_name}' "
+                    f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' "
                     f"não possui mapping configurado. Host: '{host}'."
                 )
             else:
@@ -124,7 +140,7 @@ def test_should_validate_has_rsa_opensearch_client(
         except Exception as error:
             failures.append(
                 f"Cliente '{target.client_id}' | falha ao validar o índice RSA "
-                f"'{expected_index_name}': {error.__class__.__name__}: {error}"
+                f"'{RSA_INDEX_NAME}': {error.__class__.__name__}: {error}"
             )
         report.add_client_result(target.client_id, failures)
     _save_client_report(report, test_name)

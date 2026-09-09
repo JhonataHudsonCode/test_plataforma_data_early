@@ -185,10 +185,9 @@ class ClientValidationReport:
         bdd_start = lines.index("BDD:") + 1 if "BDD:" in lines else 0
         bdd_lines: list[str] = []
         for line in lines[bdd_start:]:
-            if line == "" and bdd_lines:
+            if line.startswith("Falhas ("):
                 break
-            if line:
-                bdd_lines.append(line)
+            bdd_lines.append(line)
 
         sections: dict[str, list[tuple[str, list[str]]]] = {
             "Falhas": [],
@@ -326,10 +325,9 @@ class ClientValidationReport:
         bdd_lines: list[str] = []
         if bdd_start is not None:
             for line in lines[bdd_start:]:
-                if line == "" and bdd_lines:
+                if line.startswith("Falhas ("):
                     break
-                if line:
-                    bdd_lines.append(line)
+                bdd_lines.append(line)
         bdd_html = "<br>".join(escape(line) for line in bdd_lines) or "BDD não encontrado."
 
         sections: dict[str, list[tuple[str, list[str]]]] = {
