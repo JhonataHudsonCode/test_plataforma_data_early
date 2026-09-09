@@ -35,12 +35,14 @@ class ClientValidationReport:
         client_id: str,
         failures: list[str] | None = None,
         infos: list[str] | None = None,
+        details: list[str] | None = None,
     ) -> None:
         client_logs = self._log_records[self._log_cursor:]
         self._log_cursor = len(self._log_records)
         self._results[client_id] = {
             "failures": failures or [],
             "infos": infos or [],
+            "details": details or [],
             "logs": client_logs,
         }
 
@@ -96,6 +98,10 @@ class ClientValidationReport:
                 f"  Motivo: {failure}"
                 for failure in self._results[client]["failures"]
             )
+            lines.extend(
+                f"  Detalhe: {detail}"
+                for detail in self._results[client]["details"]
+            )
         lines.extend(["", f"Informativos ({len(infos)}):"])
         for client in infos:
             lines.append(f"- Cliente: {client}")
@@ -107,12 +113,20 @@ class ClientValidationReport:
                 f"  Informação: {info}"
                 for info in self._results[client]["infos"]
             )
+            lines.extend(
+                f"  Detalhe: {detail}"
+                for detail in self._results[client]["details"]
+            )
         lines.extend(["", f"Aprovados ({len(passed)}):"])
         for client in passed:
             lines.append(f"- Cliente: {client}")
             lines.extend(
                 f"  Log: {log}"
                 for log in self._results[client]["logs"]
+            )
+            lines.extend(
+                f"  Detalhe: {detail}"
+                for detail in self._results[client]["details"]
             )
         return "\n".join(lines)
 

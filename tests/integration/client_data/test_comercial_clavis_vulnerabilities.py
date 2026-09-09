@@ -1,7 +1,7 @@
 from datetime import date
 import inspect
+import logging
 
-from psycopg import logger
 import pytest
 import allure
 
@@ -44,6 +44,7 @@ INDEX_CLIENT_NAME = "comercial"
 INDEX_ACTIVATION_KEY_NAME = "Clavis Base"
 CLIENT_SCHEMA = "public"
 ACTIVE_STATUS = "ativo"
+logger = logging.getLogger(__name__)
 
 def _save_client_report(
     report: ClientValidationReport,
@@ -81,6 +82,7 @@ def test_should_validate_has_rsa_opensearch_client(
 
     for target in client_targets:
         failures: list[str] = []
+        rsa_reading_details: list[str] = []
         client = db_client_repository.get_table(
             schema_name=CLIENT_SCHEMA,
             client_id=target.client_id,
@@ -111,22 +113,35 @@ def test_should_validate_has_rsa_opensearch_client(
                 report.add_client_result(target.client_id, failures)
                 continue
 
-            documents = client_repository.get_documents(
+            latest_document = client_repository.get_latest_document(
                 host,
                 RSA_INDEX_NAME,
-                size=index.document_count,
             )
-            has_document_from_today = any(
-                str(document.get("_source", {}).get("scan_date", "")).startswith(
-                    today.isoformat()
-                )
-                for document in documents
-            )
-            if not has_document_from_today:
+            if latest_document is None:
                 failures.append(
                     f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' | "
-                    f"nenhum documento possui scan_date em '{today:%Y-%m-%d}'."
+                    "nenhum documento encontrado."
                 )
+            else:
+                source = latest_document.get("_source", {})
+                last_read_at = str(source.get("@timestamp", ""))
+                first_scan_at = str(source.get("first_scan", ""))
+                rsa_reading_details = [
+                    f"Última leitura (@timestamp): {last_read_at or 'não informado'}.",
+                    f"Primeira leitura (first_scan): {first_scan_at or 'não informado'}.",
+                ]
+                logger.info(
+                    "Cliente %s | índice rsa | %s | %s",
+                    target.client_id,
+                    rsa_reading_details[0],
+                    rsa_reading_details[1],
+                )
+                if not last_read_at.startswith(today.isoformat()):
+                    failures.append(
+                        f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' | "
+                        f"o documento mais recente possui @timestamp '{last_read_at or 'não informado'}', "
+                        f"mas era esperada a data '{today:%Y-%m-%d}'."
+                    )
             metadata = client_repository.get_index_metadata(host, RSA_INDEX_NAME)
             if not metadata.mapping:
                 failures.append(
@@ -142,7 +157,11 @@ def test_should_validate_has_rsa_opensearch_client(
                 f"Cliente '{target.client_id}' | falha ao validar o índice RSA "
                 f"'{RSA_INDEX_NAME}': {error.__class__.__name__}: {error}"
             )
-        report.add_client_result(target.client_id, failures)
+        report.add_client_result(
+            target.client_id,
+            failures,
+            details=rsa_reading_details,
+        )
     _save_client_report(report, test_name)
     report.assert_no_failures()
 

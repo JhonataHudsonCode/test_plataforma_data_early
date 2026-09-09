@@ -119,6 +119,28 @@ class OpenSearchClientRepository:
 
             return response['hits']['hits']
 
+    def get_latest_document(
+        self,
+        client_host: str,
+        index_name: str,
+    ) -> dict[str, Any] | None:
+        """Retorna o documento com o @timestamp mais recente do índice."""
+        connection = self._connection_factory.create_for_host(client_host)
+        try:
+            response = connection.client.search(
+                index=index_name,
+                body={
+                    "size": 1,
+                    "sort": [{"@timestamp": {"order": "desc"}}],
+                    "query": {"match_all": {}},
+                },
+            )
+        finally:
+            connection.close()
+
+        documents = response["hits"]["hits"]
+        return documents[0] if documents else None
+
     def get_index_metadata(
         self,
         client_host: str,
