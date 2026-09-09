@@ -9,7 +9,7 @@ from src.models.opensearch_client.rules_mapping import (
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_ALERTS_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
-from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
+from src.validators.client_data.opensearch_client.helpers import OpenSearchClientValidationHelper
 
 
 class RulesIndexValidator:
@@ -19,9 +19,11 @@ class RulesIndexValidator:
         self,
         cognito_repository: DataBaseRepository,
         opensearch_repository: OpenSearchClientRepository,
+        reference_date: date,
     ) -> None:
         self._cognito_repository = cognito_repository
         self._opensearch_repository = opensearch_repository
+        self._reference_date = reference_date
 
     def validate(self, target: ClientTarget) -> ClientValidationResult:
         client = self._cognito_repository.get_table(
@@ -53,8 +55,16 @@ class RulesIndexValidator:
                     "retornou zero documentos."
                 )
 
-            metadata = self._opensearch_repository.get_index_metadata(host, RULES_INDEX_NAME)
-            if not metadata.mapping:
+            timestamp_failures, details = OpenSearchClientValidationHelper.validate_latest_document(
+                self._opensearch_repository, target.client_id, host, RULES_INDEX_NAME,
+                self._reference_date,
+            )
+            failures.extend(timestamp_failures)
+
+            has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
+                self._opensearch_repository, host, RULES_INDEX_NAME, EXPECTED_RULES_MAPPING
+            )
+            if not has_mapping:
                 failures.append(
                     f"Cliente '{target.client_id}' | host '{host}' | índice rules "
                     "não possui mapping configurado."
@@ -63,11 +73,9 @@ class RulesIndexValidator:
                 failures.extend(
                     f"Cliente '{target.client_id}' | índice '{RULES_INDEX_NAME}' | "
                     f"host '{host}' | mapping inválido: {error}"
-                    for error in OpenSearchMappingValidator().validate(
-                        metadata.mapping.get("properties", {}), EXPECTED_RULES_MAPPING
-                    )
+                    for error in mapping_errors
                 )
-            return ClientValidationResult(target.client_id, failures=failures)
+            return ClientValidationResult(target.client_id, failures=failures, details=details)
         except Exception as error:
             return ClientValidationResult(
                 target.client_id,
@@ -76,3 +84,4 @@ class RulesIndexValidator:
                     f"o índice rules: {error.__class__.__name__}: {error}"
                 ],
             )
+from datetime import date

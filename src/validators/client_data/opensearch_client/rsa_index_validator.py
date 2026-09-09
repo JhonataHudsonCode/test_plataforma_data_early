@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from datetime import date
 
 from src.config.settings import ClientTarget
@@ -12,10 +11,9 @@ from src.models.opensearch_client.rsa_mapping import (
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_RSA_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
-from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
+from src.validators.client_data.opensearch_client.helpers import OpenSearchClientValidationHelper
 
 
-logger = logging.getLogger(__name__)
 CLIENT_SCHEMA = "public"
 
 
@@ -69,8 +67,16 @@ class RsaIndexValidator:
                     ],
                 )
 
-            failures, details = self._validate_latest_document(target.client_id, host)
-            failures.extend(self._validate_mapping(target.client_id, host))
+            failures, details = OpenSearchClientValidationHelper.validate_latest_document(
+                self._opensearch_repository, target.client_id, host, RSA_INDEX_NAME,
+                self._reference_date, ("first_scan",),
+            )
+            has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
+                self._opensearch_repository, host, RSA_INDEX_NAME, EXPECTED_RSA_MAPPING
+            )
+            if not has_mapping:
+                failures.append(f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' não possui mapping configurado. Host: '{host}'.")
+            failures.extend(mapping_errors)
             return ClientValidationResult(target.client_id, failures=failures, details=details)
         except Exception as error:
             return ClientValidationResult(
@@ -80,41 +86,3 @@ class RsaIndexValidator:
                     f"'{RSA_INDEX_NAME}': {error.__class__.__name__}: {error}"
                 ],
             )
-
-    def _validate_latest_document(
-        self,
-        client_id: str,
-        host: str,
-    ) -> tuple[list[str], list[str]]:
-        document = self._opensearch_repository.get_latest_document(host, RSA_INDEX_NAME)
-        if document is None:
-            return [f"Cliente '{client_id}' | índice RSA '{RSA_INDEX_NAME}' | nenhum documento encontrado."], []
-
-        source = document.get("_source", {})
-        last_read_at = str(source.get("@timestamp", ""))
-        first_scan_at = str(source.get("first_scan", ""))
-        details = [
-            f"Última leitura (@timestamp): {last_read_at or 'não informado'}.",
-            f"Primeira leitura (first_scan): {first_scan_at or 'não informado'}.",
-        ]
-        logger.info("Cliente %s | índice rsa | %s | %s", client_id, *details)
-
-        if last_read_at.startswith(self._reference_date.isoformat()):
-            return [], details
-        return [
-            f"Cliente '{client_id}' | índice RSA '{RSA_INDEX_NAME}' | "
-            f"o documento mais recente possui @timestamp '{last_read_at or 'não informado'}', "
-            f"mas era esperada a data '{self._reference_date:%Y-%m-%d}'."
-        ], details
-
-    def _validate_mapping(self, client_id: str, host: str) -> list[str]:
-        metadata = self._opensearch_repository.get_index_metadata(host, RSA_INDEX_NAME)
-        if not metadata.mapping:
-            return [
-                f"Cliente '{client_id}' | índice RSA '{RSA_INDEX_NAME}' "
-                f"não possui mapping configurado. Host: '{host}'."
-            ]
-        return OpenSearchMappingValidator().validate(
-            metadata.mapping.get("properties", {}),
-            EXPECTED_RSA_MAPPING,
-        )

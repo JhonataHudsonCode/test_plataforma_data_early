@@ -99,7 +99,11 @@ def test_should_validate_rules_opensearch_client(
 ) -> None:
     report = ClientValidationReport()
     test_name = inspect.currentframe().f_code.co_name
-    validator = RulesIndexValidator(db_client_repository, client_repository)
+    validator = RulesIndexValidator(
+        db_client_repository,
+        client_repository,
+        date.today(),
+    )
     for target in client_targets:
         result = validator.validate(target)
         report.add_client_result(
