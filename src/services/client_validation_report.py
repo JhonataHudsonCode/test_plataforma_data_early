@@ -91,10 +91,6 @@ class ClientValidationReport:
         for client in failed:
             lines.append(f"- Cliente: {client}")
             lines.extend(
-                f"  Log: {log}"
-                for log in self._results[client]["logs"]
-            )
-            lines.extend(
                 f"  Motivo: {failure}"
                 for failure in self._results[client]["failures"]
             )
@@ -106,10 +102,6 @@ class ClientValidationReport:
         for client in infos:
             lines.append(f"- Cliente: {client}")
             lines.extend(
-                f"  Log: {log}"
-                for log in self._results[client]["logs"]
-            )
-            lines.extend(
                 f"  Informação: {info}"
                 for info in self._results[client]["infos"]
             )
@@ -120,10 +112,6 @@ class ClientValidationReport:
         lines.extend(["", f"Aprovados ({len(passed)}):"])
         for client in passed:
             lines.append(f"- Cliente: {client}")
-            lines.extend(
-                f"  Log: {log}"
-                for log in self._results[client]["logs"]
-            )
             lines.extend(
                 f"  Detalhe: {detail}"
                 for detail in self._results[client]["details"]

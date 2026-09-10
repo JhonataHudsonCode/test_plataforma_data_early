@@ -21,7 +21,6 @@ class OpenSearchClientValidationHelper:
         host: str,
         index_name: str,
         reference_date: date,
-        detail_fields: tuple[str, ...] = (),
     ) -> tuple[list[str], list[str]]:
         document = repository.get_latest_document(host, index_name)
         if document is None:
@@ -31,11 +30,6 @@ class OpenSearchClientValidationHelper:
         timestamp = str(source.get("@timestamp", ""))
         details = [f"Última leitura (@timestamp): {timestamp or 'não informado'}."
         ]
-        details.extend(
-            f"{'Primeira leitura (first_scan)' if field == 'first_scan' else field}: "
-            f"{str(source.get(field, '')) or 'não informado'}."
-            for field in detail_fields
-        )
         logger.info("Cliente %s | índice %s | %s", client_id, index_name, " | ".join(details))
         if timestamp.startswith(reference_date.isoformat()):
             return [], details

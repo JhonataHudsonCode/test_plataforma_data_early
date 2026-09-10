@@ -69,7 +69,7 @@ class RsaIndexValidator:
 
             failures, details = OpenSearchClientValidationHelper.validate_latest_document(
                 self._opensearch_repository, target.client_id, host, RSA_INDEX_NAME,
-                self._reference_date, ("first_scan",),
+                self._reference_date,
             )
             has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
                 self._opensearch_repository, host, RSA_INDEX_NAME, EXPECTED_RSA_MAPPING
