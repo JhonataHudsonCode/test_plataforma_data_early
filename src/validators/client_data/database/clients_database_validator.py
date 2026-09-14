@@ -24,7 +24,13 @@ class ClientsDatabaseValidator:
         id_row = self._clients_repository.get_table("public", target.client_id, SELECT_ID_CLIENTS)
         if not id_row or id_row.get("id") is None:
             return ClientValidationResult(target.client_id, failures=[f"Cliente '{target.client_id}' | tabela 'clients' | não foi possível obter o id para consultar alertClients."])
-        return ClientValidationResult(target.client_id, failures=self._validate_tables(target.client_id, id_row["id"]))
+        failures = self._validate_tables(target.client_id, id_row["id"])
+        if failures:
+            return ClientValidationResult(target.client_id, failures=failures)
+        return ClientValidationResult(
+            target.client_id,
+            details=["Registros de clients e alertClients encontrados com createdAt e updatedAt preenchidos."],
+        )
 
     def _validate_tables(self, client_id: str, id_client: object) -> list[str]:
         failures: list[str] = []
