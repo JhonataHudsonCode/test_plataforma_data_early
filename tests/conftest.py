@@ -41,6 +41,15 @@ COGNITO_DATABASE = "cognito"
 ASSETS_DATABASE = "assets"
 CLIENTS_DATABASE = "clients"
 
+
+def _report_has_failures(report: str) -> bool:
+    """Indica se o relatório curado possui ao menos uma falha."""
+    return any(
+        line.startswith("Falhas (") and not line.startswith("Falhas (0)")
+        for line in report.splitlines()
+    )
+
+
 def pytest_sessionstart(session):
     """
     Executado quando a sessão de testes começa. Aqui, podemos realizar ações de configuração ou inicialização.
@@ -59,16 +68,22 @@ def pytest_sessionfinish(session, exitstatus):
     Executado quando toda a sessão de testes termina. Aqui, podemos realizar ações de limpeza ou relatórios finais.
     """
 
+    report_paths = sorted(Path("reports/client-validation").glob("*.txt"))
+    failed_reports: list[tuple[Path, str]] = []
+    for report_path in report_paths:
+        body = report_path.read_text(encoding="utf-8")
+        html_report_path = report_path.with_suffix(".html")
+        ClientValidationReport.write_html_from_text(report_path, html_report_path)
+        if _report_has_failures(body):
+            failed_reports.append((report_path, body))
+
+    if exitstatus == pytest.ExitCode.OK and not failed_reports:
+        print("Nenhuma falha encontrada; envio de e-mail não necessário.")
+        return
+
     try:
         email_service = EmailService()
-        report_paths = sorted(Path("reports/client-validation").glob("*.txt"))
-        for report_path in report_paths:
-            html_report_path = report_path.with_suffix(".html")
-            body = report_path.read_text(encoding="utf-8")
-            ClientValidationReport.write_html_from_text(
-                report_path,
-                html_report_path,
-            )
+        for report_path, body in failed_reports:
             email_html = ClientValidationReport.email_html_from_text(report_path)
             subject = f"Relatório de Testes - {report_path.stem}"
             email_sent = email_service.send_email(
@@ -78,6 +93,15 @@ def pytest_sessionfinish(session, exitstatus):
             )
             if email_sent:
                 print(f"Relatório aceito pelo servidor SMTP: {report_path.name}")
+
+        if not failed_reports:
+            subject = "Relatório de Testes - falha na execução"
+            body = (
+                "A execução dos testes terminou com erro, mas não foi possível "
+                "associá-lo a um relatório por cliente. "
+                f"Código de saída do Pytest: {exitstatus}."
+            )
+            email_service.send_email(subject, body)
 
     except (OSError, RuntimeError, ValueError) as error:
         print(f"Aviso: não foi possível enviar o relatório por e-mail: {error}")
