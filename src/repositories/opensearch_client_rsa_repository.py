@@ -101,45 +101,27 @@ class OpenSearchClientRepository:
             client_host: str,
             index_name: str,
             size: int = 10,
+            sort_by_timestamp: bool = False,
         ) -> list[dict[str, Any]]:
             """Retorna documentos de um índice RSA do OpenSearch do cliente."""
             connection = self._connection_factory.create_for_host(client_host)
 
             try:
+                body: dict[str, Any] = {
+                    "size": size,
+                    "query": {"match_all": {}},
+                }
+                if sort_by_timestamp:
+                    body["sort"] = [{"@timestamp": {"order": "desc"}}]
                 response = connection.client.search(
                     index=index_name,
-                    body={
-                        "size": size,
-                        "query": {"match_all": {}},
-                    },
+                    body=body,
                 )
 
             finally:
                 connection.close()
 
             return response['hits']['hits']
-
-    def get_latest_document(
-        self,
-        client_host: str,
-        index_name: str,
-    ) -> dict[str, Any] | None:
-        """Retorna o documento com o @timestamp mais recente do índice."""
-        connection = self._connection_factory.create_for_host(client_host)
-        try:
-            response = connection.client.search(
-                index=index_name,
-                body={
-                    "size": 1,
-                    "sort": [{"@timestamp": {"order": "desc"}}],
-                    "query": {"match_all": {}},
-                },
-            )
-        finally:
-            connection.close()
-
-        documents = response["hits"]["hits"]
-        return documents[0] if documents else None
 
     def get_index_metadata(
         self,

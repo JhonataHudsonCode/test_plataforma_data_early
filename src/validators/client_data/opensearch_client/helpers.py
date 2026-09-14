@@ -16,6 +16,21 @@ class OpenSearchClientValidationHelper:
     """Regras reutilizáveis para documentos e mappings de índices por cliente."""
 
     @staticmethod
+    def get_latest_document(
+        repository: OpenSearchClientRepository,
+        host: str,
+        index_name: str,
+    ) -> dict[str, Any] | None:
+        """Busca o documento mais recente pelo campo @timestamp."""
+        documents = repository.get_documents(
+            host,
+            index_name,
+            size=1,
+            sort_by_timestamp=True,
+        )
+        return documents[0] if documents else None
+
+    @staticmethod
     def validate_latest_document(
         repository: OpenSearchClientRepository,
         client_id: str,
@@ -23,7 +38,11 @@ class OpenSearchClientValidationHelper:
         index_name: str,
         reference_date: date,
     ) -> tuple[list[str], list[str]]:
-        document = repository.get_latest_document(host, index_name)
+        document = OpenSearchClientValidationHelper.get_latest_document(
+            repository,
+            host,
+            index_name,
+        )
         if document is None:
             return [f"Cliente '{client_id}' | índice '{index_name}' | nenhum documento encontrado."], []
 
@@ -68,7 +87,11 @@ class OpenSearchClientValidationHelper:
         if minimum_months < 1:
             raise ValueError("minimum_months deve ser maior ou igual a 1.")
 
-        document = repository.get_latest_document(host, index_name)
+        document = OpenSearchClientValidationHelper.get_latest_document(
+            repository,
+            host,
+            index_name,
+        )
         if document is None:
             return [
                 f"Cliente '{client_id}' | índice '{index_name}' | nenhum documento encontrado."
