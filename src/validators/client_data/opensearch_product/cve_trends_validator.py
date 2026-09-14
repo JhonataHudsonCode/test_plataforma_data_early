@@ -12,26 +12,27 @@ class CveTrendsValidator:
     def __init__(self, product_repository: OpenSearchVulnerabilityRepository) -> None:
         self._product_repository = product_repository
 
-    def validate(self, client_id: str) -> ClientValidationResult:
+    def validate(self) -> ClientValidationResult:
+        report_id = "produto"
         failures: list[str] = []
         try:
             indices = self._product_repository.get_indices(CVE_TRENDS_INDEX_NAME)
             index = {item.name: item for item in indices}.get(CVE_TRENDS_INDEX_NAME)
             if index is None:
-                failures.append(f"Cliente '{client_id}' | índice de produto '{CVE_TRENDS_INDEX_NAME}' não encontrado.")
+                failures.append(f"Índice de produto '{CVE_TRENDS_INDEX_NAME}' não encontrado.")
             elif index.document_count <= 0:
-                failures.append(f"Cliente '{client_id}' | índice de produto '{CVE_TRENDS_INDEX_NAME}' não contém documentos.")
+                failures.append(f"Índice de produto '{CVE_TRENDS_INDEX_NAME}' não contém documentos.")
             elif not self._product_repository.get_documents_by_status(CVE_TRENDS_INDEX_NAME, "ativo", index.document_count):
-                failures.append(f"Cliente '{client_id}' | nenhum documento com status 'ativo' foi encontrado no índice '{CVE_TRENDS_INDEX_NAME}'.")
+                failures.append(f"Nenhum documento com status 'ativo' foi encontrado no índice '{CVE_TRENDS_INDEX_NAME}'.")
 
             metadata = self._product_repository.get_index_metadata(CVE_TRENDS_INDEX_NAME)
             if not metadata.mapping:
-                failures.append(f"Cliente '{client_id}' | índice '{CVE_TRENDS_INDEX_NAME}' não possui mapping configurado.")
+                failures.append(f"Índice '{CVE_TRENDS_INDEX_NAME}' não possui mapping configurado.")
             else:
                 failures.extend(
-                    f"Cliente '{client_id}' | índice '{CVE_TRENDS_INDEX_NAME}' | mapping inválido: {error}"
+                    f"Índice '{CVE_TRENDS_INDEX_NAME}' | mapping inválido: {error}"
                     for error in OpenSearchMappingValidator().validate(metadata.mapping.get("properties", {}), EXPECTED_CVE_TRENDS_MAPPING)
                 )
         except Exception as error:
-            failures.append(f"Cliente '{client_id}' | falha ao validar o índice de produto '{CVE_TRENDS_INDEX_NAME}': {error.__class__.__name__}: {error}")
-        return ClientValidationResult(client_id, failures=failures)
+            failures.append(f"Falha ao validar o índice de produto '{CVE_TRENDS_INDEX_NAME}': {error.__class__.__name__}: {error}")
+        return ClientValidationResult(report_id, failures=failures)

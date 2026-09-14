@@ -190,14 +190,12 @@ def test_should_validate_asset_vulnerability_historical_opensearch_product(
 @allure.title("Validar dados de tendências de CVE")
 def test_should_validate_cve_trends_opensearch_product(
     product_repository: OpenSearchVulnerabilityRepository,
-    client_targets,
 ) -> None:
     report = ClientValidationReport()
     test_name = inspect.currentframe().f_code.co_name
     validator = CveTrendsValidator(product_repository)
-    for target in client_targets:
-        result = validator.validate(target.client_id)
-        report.add_client_result(result.client_id, result.failures, result.infos, result.details)
+    result = validator.validate()
+    report.add_client_result(result.client_id, result.failures, result.infos, result.details)
     _save_client_report(report, test_name)
     report.assert_no_failures()
     return
