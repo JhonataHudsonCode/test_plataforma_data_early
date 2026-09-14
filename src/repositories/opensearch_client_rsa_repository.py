@@ -117,7 +117,13 @@ class OpenSearchClientRepository:
                     index=index_name,
                     body=body,
                 )
-
+            except Exception as error:
+                message = (
+                    f"Não foi possível buscar documentos do índice '{index_name}' "
+                    f"no host '{client_host}': {error.__class__.__name__}: {error}"
+                )
+                logger.exception(message)
+                raise RuntimeError(message) from error
             finally:
                 connection.close()
 
