@@ -1,0 +1,2 @@
+****** RETORNO CONSULTA DB COGNITO ****** ClientMetadata(client_id='comercial', has_rsa=True, octopus_endpoint='https://demo.clavissecurity.com', has_alerts=True, has_bart=True, has_asset=True)
+indices_was ================== [VulnerabilityIndex(name='comercial_asset-2026.09.01', document_count=170)]

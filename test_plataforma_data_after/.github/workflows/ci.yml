@@ -1,0 +1,125 @@
+name: Build
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: ["**"]
+
+  # Allows you to run manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: python_template
+
+jobs:
+  build_and_deploy:
+    name: Build, Scan & Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
+
+      # checks if code contains credentials
+      - name: gitleaks-action
+        uses: gitleaks/gitleaks-action@518e4898c0cd1cc5d9aab6627a2eabd46e81d8da # v1.6.0
+
+      - name: Build Docker image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        id: docker-image
+        with:
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Scan image with Grype
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        id: grype-scan
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          output-format: json
+          by-cve: "true"
+          fail-build: "false"
+
+      - name: Upload grype.json as artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: grype-json
+          path: ${{ steps.grype-scan.outputs.json }}
+
+      - name: Create Grype markdown summary (ordered by severity)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GRYPE_JSON: ${{ steps.grype-scan.outputs.json }}
+        run: |
+          set -euo pipefail
+          OUT=grype-summary.md
+          echo "## Grype SCA Scan Report" > "$OUT"
+
+          if [ ! -s "$GRYPE_JSON" ]; then
+            echo "_No vulnerabilities found or grype.json missing._" >> "$OUT"
+            exit 0
+          fi
+
+          # Counts by severity
+          echo "### Vulnerabilities by severity" >> "$OUT"
+          echo "" >> "$OUT"
+          jq -r '
+            if .matches then
+              .matches[].vulnerability.severity
+            else
+              empty
+            end
+          ' "$GRYPE_JSON" 2>/dev/null | sort | uniq -c | awk '{print "- **"$2"**: "$1}' >> "$OUT" || true
+          echo "" >> "$OUT"
+
+          # Add artifact download link
+          echo "### Download all workflow artifacts" >> "$OUT"
+          echo "[Go to workflow run for artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$OUT"
+
+      - name: Post Grype summary as PR comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: grype-sbom-scan
+          path: grype-summary.md
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@0303d6b62e310685c0e34d0b9cde218036885c4d # v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Configure AWS Credentials (OIDC)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6.2.0
+        with:
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && secrets.AWS_PROD_ROLE_ECR || secrets.AWS_HML_ROLE_ECR }}
+          aws-region: ${{ github.ref == 'refs/heads/main' && secrets.AWS_PROD_REGION_ECR || secrets.AWS_HML_REGION_ECR }}
+
+      - name: Login to Amazon ECR
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+
+      - name: Create ECR repository if it does not exist
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+        run: |
+          aws ecr describe-repositories --repository-names "$IMAGE_NAME" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$IMAGE_NAME"
+
+      - name: Tag and push Docker image to ECR
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+        run: |
+          REGISTRY=${{ steps.login-ecr.outputs.registry }}
+          BRANCH=${GITHUB_REF##refs/heads/}
+          docker tag "$IMAGE_NAME:${{ github.sha }}" "$REGISTRY/$IMAGE_NAME:${{ github.sha }}"
+          docker tag "$IMAGE_NAME:${{ github.sha }}" "$REGISTRY/$IMAGE_NAME:$BRANCH"
+          docker push "$REGISTRY/$IMAGE_NAME:${{ github.sha }}"
+          docker push "$REGISTRY/$IMAGE_NAME:$BRANCH"
