@@ -18,9 +18,33 @@ class WazuhKeyValidator:
             return ClientValidationResult(target.client_id, failures=[f"Cliente '{target.client_id}' não encontrado no Cognito; consulta de has_wazuh não retornou registro."])
         if not client.get("has_wazuh"):
             return ClientValidationResult(target.client_id, infos=[f"Cliente '{target.client_id}' possui has_wazuh desabilitado; chave de ativação não aplicável."])
-        found = self._assets_repository.has_activation_key("public", target.client_id, target.activation_key_name or "", SELECT_ASSETS_CLIENT_ACTIVATION_KEYS)
-        if not found:
+        keys = self._assets_repository.get_activation_keys(
+            "public",
+            target.client_id,
+            target.activation_key_name or "",
+            SELECT_ASSETS_CLIENT_ACTIVATION_KEYS,
+        )
+        if not keys:
             return ClientValidationResult(target.client_id, failures=[f"Chave de ativação '{target.activation_key_name}' não encontrada."])
+        if len(keys) > 1:
+            return ClientValidationResult(
+                target.client_id,
+                failures=[
+                    f"Chave do Wazuh '{target.activation_key_name}' possui "
+                    f"{len(keys)} registros cadastrados; era esperado apenas 1."
+                ],
+            )
+
+        required_fields = ("activation_key_id", "client_id", "activation_key_name")
+        missing_fields = [field for field in required_fields if not keys[0].get(field)]
+        if missing_fields:
+            return ClientValidationResult(
+                target.client_id,
+                failures=[
+                    f"Chave do Wazuh '{target.activation_key_name}' possui dados "
+                    f"ausentes na tabela: {', '.join(missing_fields)}."
+                ],
+            )
         return ClientValidationResult(
             target.client_id,
             details=[f"Chave do Wazuh '{target.activation_key_name}' encontrada."],
