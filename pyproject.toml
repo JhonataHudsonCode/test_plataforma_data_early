@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qa-integration-tests"
+version = "0.1.0"
+description = "Repository template for integration tests using Pytest, PostgreSQL, OpenSearch and pytest-html."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest==9.1.1",
+    "pytest-html==4.1.1",
+    "psycopg[binary]==3.3.4",
+    "python-dotenv==1.2.3",
+    "opensearch-py==3.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

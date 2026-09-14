@@ -1,0 +1,46 @@
+[33mWARNING [0m opensearch:base.py:280 GET https://new.opensearch.homolog.clvsdev.clavissecurity.com:9200/_cat/indices/comercial_comercial_vulnerability-was-2026.09.01?expand_wildcards=all&format=json&h=index%2Cdocs.count [status:404 request:0.626s]
+[1m[31mERROR   [0m src.repositories.opensearch_vulnerability_repository:opensearch_vulnerability_repository.py:57 Não foi possível consultar o índice de Vulnerabilidade ['comercial_comercial_vulnerability-was-2026.09.01'] no OpenSearch. Índices esperados: comercial_comercial_vulnerability-was-2026.09.01. Erro retornado: NotFoundError(404, 'index_not_found_exception', 'no such index [comercial_comercial_vulnerability-was-2026.09.01]', comercial_comercial_vulnerability-was-2026.09.01, index_or_alias)
+Traceback (most recent call last):
+  File "/home/clavis/test_plataforma_data_early/src/repositories/opensearch_vulnerability_repository.py", line 36, in get_indices_vulnerability
+    indices = self._connection.client.cat.indices(
+        index=",".join(expected_index_names),
+    ...<2 lines>...
+        expand_wildcards="all",
+    )
+  File "/home/clavis/.local/lib/python3.14/site-packages/opensearchpy/client/utils.py", line 176, in _wrapped
+    return func(*args, params=params, headers=headers, **kwargs)
+  File "/home/clavis/.local/lib/python3.14/site-packages/opensearchpy/client/cat.py", line 535, in indices
+    return self.transport.perform_request(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        "GET", _make_path("_cat", "indices", index), params=params, headers=headers
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/clavis/.local/lib/python3.14/site-packages/opensearchpy/transport.py", line 457, in perform_request
+    raise e
+  File "/home/clavis/.local/lib/python3.14/site-packages/opensearchpy/transport.py", line 418, in perform_request
+    status, headers_response, data = connection.perform_request(
+                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        method,
+        ^^^^^^^
+    ...<5 lines>...
+        timeout=timeout,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/clavis/.local/lib/python3.14/site-packages/opensearchpy/connection/http_urllib3.py", line 308, in perform_request
+    self._raise_error(
+    ~~~~~~~~~~~~~~~~~^
+        response.status,
+        ^^^^^^^^^^^^^^^^
+        raw_data,
+        ^^^^^^^^^
+        self.get_response_headers(response).get("content-type"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/clavis/.local/lib/python3.14/site-packages/opensearchpy/connection/base.py", line 315, in _raise_error
+    raise HTTP_EXCEPTIONS.get(status_code, TransportError)(
+        status_code, error_message, additional_info
+    )
+opensearchpy.exceptions.NotFoundError: NotFoundError(404, 'index_not_found_exception', 'no such index [comercial_comercial_vulnerability-was-2026.09.01]', comercial_comercial_vulnerability-was-2026.09.01, index_or_alias)

@@ -1,0 +1,1 @@
+{"uuid": "4ee44913-244c-4023-a0f7-e9241536decb", "children": ["ba0d703f-9ebb-48c4-8b57-063d50cd0d6f"], "befores": [{"name": "cognito_client_repository", "status": "passed", "start": 1788271626173, "stop": 1788271626173}], "afters": [{"name": "cognito_client_repository::<lambda>", "start": 1788271627352}], "start": 1788271626173, "stop": 1788271627352}

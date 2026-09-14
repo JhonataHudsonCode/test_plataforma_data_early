@@ -1,0 +1,1 @@
+{"uuid": "23f98c43-dabd-4ea9-a9f5-49f46f48863d", "children": ["d958a8c5-e47c-4f57-b86f-f17544401c61"], "befores": [{"name": "postgres_connection_factory", "status": "passed", "start": 1788271527850, "stop": 1788271527850}], "afters": [{"name": "postgres_connection_factory::<lambda>", "start": 1788271530097}], "start": 1788271527850, "stop": 1788271530097}
