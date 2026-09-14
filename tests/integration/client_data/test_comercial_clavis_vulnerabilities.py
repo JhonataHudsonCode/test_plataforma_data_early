@@ -102,7 +102,6 @@ def test_should_validate_rules_opensearch_client(
     validator = RulesIndexValidator(
         db_client_repository,
         client_repository,
-        date.today(),
     )
     for target in client_targets:
         result = validator.validate(target)

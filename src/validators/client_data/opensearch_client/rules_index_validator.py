@@ -13,17 +13,15 @@ from src.validators.client_data.opensearch_client.helpers import OpenSearchClien
 
 
 class RulesIndexValidator:
-    """Valida documentos e mapping do índice rules por cliente."""
+    """Valida existência, documentos e mapping do índice rules por cliente."""
 
     def __init__(
         self,
         cognito_repository: DataBaseRepository,
         opensearch_repository: OpenSearchClientRepository,
-        reference_date: date,
     ) -> None:
         self._cognito_repository = cognito_repository
         self._opensearch_repository = opensearch_repository
-        self._reference_date = reference_date
 
     def validate(self, target: ClientTarget) -> ClientValidationResult:
         client = self._cognito_repository.get_table(
@@ -49,17 +47,23 @@ class RulesIndexValidator:
         host = target.host or client["octopus_endpoint"].replace("https://", "")
         try:
             failures: list[str] = []
-            if not self._opensearch_repository.get_documents(host, RULES_INDEX_NAME):
+            details: list[str] = []
+            indices = self._opensearch_repository.get_indices_rsa(host, RULES_INDEX_NAME)
+            index = {item.name: item for item in indices}.get(RULES_INDEX_NAME)
+            if index is None:
+                failures.append(
+                    f"Cliente '{target.client_id}' | host '{host}' | índice rules não encontrado."
+                )
+                return ClientValidationResult(target.client_id, failures=failures)
+            if index.document_count <= 0:
                 failures.append(
                     f"Cliente '{target.client_id}' | host '{host}' | índice rules "
                     "retornou zero documentos."
                 )
-
-            timestamp_failures, details = OpenSearchClientValidationHelper.validate_latest_document(
-                self._opensearch_repository, target.client_id, host, RULES_INDEX_NAME,
-                self._reference_date,
-            )
-            failures.extend(timestamp_failures)
+            else:
+                details.append(
+                    f"Índice rules encontrado com {index.document_count} documento(s)."
+                )
 
             has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
                 self._opensearch_repository, host, RULES_INDEX_NAME, EXPECTED_RULES_MAPPING
@@ -75,6 +79,8 @@ class RulesIndexValidator:
                     f"host '{host}' | mapping inválido: {error}"
                     for error in mapping_errors
                 )
+                if not mapping_errors:
+                    details.append("Mapping do índice rules validado com sucesso.")
             return ClientValidationResult(target.client_id, failures=failures, details=details)
         except Exception as error:
             return ClientValidationResult(
@@ -84,4 +90,3 @@ class RulesIndexValidator:
                     f"o índice rules: {error.__class__.__name__}: {error}"
                 ],
             )
-from datetime import date
