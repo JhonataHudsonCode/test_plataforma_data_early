@@ -10,8 +10,12 @@ from pathlib import Path
 from src.services.email_service import EmailService
 
 from src.config.settings import (
+    ClientOpenSearchCredentials,
+    ClientTarget,
     OpenSearchSettings,
     PostgresSettings,
+    client_credentials_from_env,
+    client_selection_source,
 )
 from src.connections.opensearch import OpenSearchConnection
 from src.connections.opensearch_factory import OpenSearchConnectionFactory
@@ -146,9 +150,43 @@ def product_repository(
 @pytest.fixture(scope="session")
 def client_repository(
     opensearch_settings: OpenSearchSettings,
+    client_credentials: list[ClientOpenSearchCredentials],
 ) -> OpenSearchClientRepository:
-    connection_factory = OpenSearchConnectionFactory(opensearch_settings)
+    connection_factory = OpenSearchConnectionFactory(
+        opensearch_settings,
+        client_credentials=client_credentials,
+    )
     return OpenSearchClientRepository(connection_factory)
+
+
+@pytest.fixture(scope="session")
+def client_credentials() -> list[ClientOpenSearchCredentials]:
+    return client_credentials_from_env()
+
+
+@pytest.fixture(scope="session")
+def client_targets(
+    cognito_client_repository: CognitoClientRepository,
+    client_credentials: list[ClientOpenSearchCredentials],
+) -> list[ClientTarget]:
+    """Seleciona os clientes pelo banco (padrão) ou pelas credenciais do ambiente."""
+    if client_selection_source() == "credentials":
+        return [
+            ClientTarget(
+                client_id=item.client_id,
+                activation_key_name=item.activation_key_name,
+                credentials=item,
+            )
+            for item in client_credentials
+        ]
+
+    return [
+        ClientTarget(
+            client_id=str(item["client_id"]),
+            endpoint=item.get("octopus_endpoint"),
+        )
+        for item in cognito_client_repository.list_clients("public")
+    ]
 
 
 @pytest.fixture(scope="session")

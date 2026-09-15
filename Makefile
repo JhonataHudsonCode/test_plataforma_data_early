@@ -1,35 +1,37 @@
 .PHONY: install test test-hml test-prod test-credentials test-hml-credentials test-prod-credentials test-postgres report open-report serve-report up down clean
 
+PYTHON ?= python
+
 install:
-	python3.14 -m pip install --upgrade pip
-	pip install -r requirements.txt
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -r requirements.txt
 
 test:
-	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database pytest
+	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest
 
 test-hml:
-	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database pytest
+	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest
 
 test-prod:
-	TEST_ENV=prod CLIENT_SELECTION_SOURCE=database pytest
+	TEST_ENV=prod CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest
 
 test-credentials:
-	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials pytest
+	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest
 
 test-hml-credentials:
-	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials pytest
+	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest
 
 test-prod-credentials:
-	TEST_ENV=prod CLIENT_SELECTION_SOURCE=credentials pytest
+	TEST_ENV=prod CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest
 
 test-postgres:
-	pytest -m postgres
+	$(PYTHON) -m pytest -m postgres
 
 open-report:
 	xdg-open reports/test-report.html
 
 serve-report:
-	python -m http.server 8000 --directory reports
+	$(PYTHON) -m http.server 8000 --directory reports
 
 up:
 	docker compose up -d postgres
