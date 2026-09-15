@@ -167,6 +167,14 @@ class ProductDataValidator:
                 f"Índice '{index_name}' não possui documentos no dia anterior "
                 f"ao mais recente ({previous_day.isoformat()})."
             )
+        else:
+            self._validate_monitored_assets_variation(
+                index_name,
+                document,
+                previous_day_documents[0],
+                errors,
+                details,
+            )
         if document_date != self._reference_date:
             errors.append(
                 f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
@@ -180,9 +188,73 @@ class ProductDataValidator:
             "documento mais recente é de hoje."
         )
 
+    def _validate_monitored_assets_variation(
+        self,
+        index_name: str,
+        latest_document: dict[str, Any],
+        previous_document: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que os indicadores monitorados não cresçam mais de 50% ao dia."""
+        latest_asset = self._source(latest_document).get("asset")
+        previous_asset = self._source(previous_document).get("asset")
+        if not isinstance(latest_asset, dict) or not isinstance(previous_asset, dict):
+            errors.append(
+                f"Índice '{index_name}' | campo asset ausente nos documentos "
+                "mais recente ou do dia anterior."
+            )
+            return
+
+        for field in ("monitored_vulns", "monitored_events"):
+            current_value = latest_asset.get(field)
+            previous_value = previous_asset.get(field)
+            if not self._is_number(current_value) or not self._is_number(previous_value):
+                errors.append(
+                    f"Índice '{index_name}' | asset.{field} deve ser numérico nos "
+                    "documentos mais recente e do dia anterior."
+                )
+                continue
+
+            current = float(current_value)
+            previous = float(previous_value)
+            if previous < 0 or current < 0:
+                errors.append(
+                    f"Índice '{index_name}' | asset.{field} não pode possuir valor negativo "
+                    f"(anterior={previous_value}, mais recente={current_value})."
+                )
+                continue
+            if previous == 0:
+                if current > 0:
+                    errors.append(
+                        f"Índice '{index_name}' | asset.{field} aumentou de 0 para "
+                        f"{current_value}; excede o limite de 50%."
+                    )
+                else:
+                    details.append(
+                        f"Índice '{index_name}' | asset.{field}: sem variação (0 para 0)."
+                    )
+                continue
+
+            variation = (current - previous) / previous
+            details.append(
+                f"Índice '{index_name}' | asset.{field}: anterior={previous_value}, "
+                f"mais recente={current_value}, variação={variation:.0%}."
+            )
+            if variation > 0.5:
+                errors.append(
+                    f"Índice '{index_name}' | asset.{field} aumentou {variation:.0%} "
+                    f"(anterior={previous_value}, mais recente={current_value}); "
+                    "máximo permitido: 50%."
+                )
+
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
         return document.get("_source", document)
+
+    @staticmethod
+    def _is_number(value: object) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
 
     @staticmethod
     def _parse_date(value: object) -> date | None:
