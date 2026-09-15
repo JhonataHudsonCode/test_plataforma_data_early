@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
 from src.config.settings import ClientTarget
@@ -9,102 +8,62 @@ from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 
 
-@dataclass(frozen=True, slots=True)
-class IndexSnapshot:
-    name: str
-    today_documents: list[dict[str, Any]]
-    yesterday_documents: list[dict[str, Any]]
-
-
 class ProductDataValidator:
-    """Valida os índices de produto produzidos pelo pipeline pós-processamento."""
+    """Valida a aplicação do módulo no Cognito e a atualização de seus índices."""
 
     def __init__(
         self,
         repository: OpenSearchVulnerabilityRepository,
         cognito_repository: CognitoClientRepository,
         reference_date: date | None = None,
-        maximum_variation: float = 0.80,
     ) -> None:
         self._repository = repository
         self._cognito_repository = cognito_repository
         self._reference_date = reference_date or date.today()
-        self._maximum_variation = maximum_variation
 
     def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        client, errors, details = self._get_applicable_client(target, "has_asset")
-        if client is None:
-            return errors, details
-        client_id = target.client_id
-        asset = self._snapshot(f"{client_id}_asset", errors, details)
-        observability = self._snapshot(f"{client_id}_asset-historical-observability", errors, details)
-        software = self._snapshot(f"{client_id}_asset-historical-software", errors, details)
-        if asset:
-            self._validate_document_variation(asset, errors, details, "ativos inventariados")
-            self._validate_asset_classification(asset.today_documents, errors, details)
-            self._validate_positive_asset_score(asset.today_documents, errors, details)
-        if observability:
-            self._validate_document_variation(observability, errors, details, "dados de observabilidade")
-        if software:
-            self._validate_document_variation(software, errors, details, "histórico de software")
-        return errors, details
+        return self._validate_module_indices(
+            target,
+            "has_asset",
+            (
+                "asset",
+                "asset-historical-observability",
+                "asset-historical-software",
+            ),
+        )
 
     def validate_compliance(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        client, errors, details = self._get_applicable_client(target, "has_wazuh")
-        if client is None:
-            return errors, details
-        client_id = target.client_id
-        index_errors, index_details = self._validate_current_indices(
-            client_id,
+        return self._validate_module_indices(
+            target,
+            "has_wazuh",
             ("asset-compliance", "asset-policy-compliance"),
         )
-        return errors + index_errors, details + index_details
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        client, errors, details = self._get_applicable_client(target, "has_asset")
-        if client is None:
-            return errors, details
-        client_id = target.client_id
-        index_errors, index_details = self._validate_current_indices(
-            client_id,
+        return self._validate_module_indices(
+            target,
+            "has_asset",
             ("authorized-software", "mandatory-software"),
         )
-        return errors + index_errors, details + index_details
 
     def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        client, errors, details = self._get_applicable_client(target, "is_in_platform")
-        if client is None:
-            return errors, details
-        client_id = target.client_id
-        snapshot = self._snapshot(f"{client_id}_score_history", errors, details)
-        if not snapshot:
-            return errors, details
-        current = self._source(snapshot.today_documents[0])
-        flattened = dict(self._flatten(current))
-        enabled_modules = [key.removeprefix("has_") for key, value in client.items() if key.startswith("has_") and bool(value)]
-        for module in enabled_modules:
-            scores = [value for key, value in flattened.items() if module in key.casefold() and "score" in key.casefold() and isinstance(value, (int, float))]
-            if not scores:
-                errors.append(f"Score do módulo habilitado '{module}' não encontrado.")
-            elif any(value <= 0 or value == -1 for value in scores):
-                errors.append(f"Score inválido para o módulo '{module}': {scores}.")
-        if not self._has_current_month_document(snapshot.today_documents):
-            errors.append("Não foi encontrado documento mensal referente ao mês corrente.")
-        if not any("global" in key.casefold() for key in flattened):
-            errors.append("Comparativo global não encontrado no score.")
-        if not any("sector" in key.casefold() or "setor" in key.casefold() for key in flattened):
-            errors.append("Comparativo de setor não encontrado no score.")
-        self._validate_numeric_variation(snapshot, errors, details, "score")
-        return errors, details
+        return self._validate_module_indices(target, "is_in_platform", ("score_history",))
 
     def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        client, errors, details = self._get_applicable_client(target, "is_saas")
+        return self._validate_module_indices(target, "is_saas", ("oto_dashboard",))
+
+    def _validate_module_indices(
+        self,
+        target: ClientTarget,
+        expected_flag: str,
+        index_suffixes: Iterable[str],
+    ) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, expected_flag)
         if client is None:
             return errors, details
-        client_id = target.client_id
-        snapshot = self._snapshot(f"{client_id}_oto_dashboard", errors, details)
-        if snapshot:
-            self._validate_numeric_variation(snapshot, errors, details, "métricas do OTO Dashboard")
+
+        for suffix in index_suffixes:
+            self._validate_index(f"{target.client_id}_{suffix}", errors, details)
         return errors, details
 
     def _get_applicable_client(
@@ -130,111 +89,91 @@ class ProductDataValidator:
                 f"Cliente '{target.client_id}' possui {expected_flag} desabilitado no Cognito; "
                 "índices não aplicáveis."
             ]
-
         return client, [], [
             f"Cliente '{target.client_id}' | Cognito validado: {expected_flag} habilitado."
         ]
 
-    def _validate_current_indices(self, client_id: str, suffixes: Iterable[str]) -> tuple[list[str], list[str]]:
-        errors, details = [], []
-        for suffix in suffixes:
-            self._snapshot(f"{client_id}_{suffix}", errors, details)
-        return errors, details
-
-    def _snapshot(self, index_name: str, errors: list[str], details: list[str]) -> IndexSnapshot | None:
+    def _validate_index(
+        self,
+        index_name: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
         try:
-            index = next((item for item in self._repository.get_indices(index_name) if item.name == index_name), None)
+            index = next(
+                (item for item in self._repository.get_indices(index_name) if item.name == index_name),
+                None,
+            )
             if index is None:
-                errors.append(f"Índice não encontrado: {index_name}.")
-                return None
+                errors.append(f"Índice '{index_name}' não encontrado.")
+                return
             if index.document_count <= 0:
-                errors.append(f"Índice sem documentos: {index_name}.")
-                return None
-            start = datetime.combine(self._reference_date, time.min)
-            today_documents = self._repository.get_documents_between(index_name, start, start + timedelta(days=1))
-            yesterday_documents = self._repository.get_documents_between(index_name, start - timedelta(days=1), start)
+                errors.append(f"Índice '{index_name}' não possui documentos.")
+                return
+
+            document = self._repository.get_latest_document(index_name)
         except Exception as error:
-            errors.append(f"Erro ao consultar documentos do índice {index_name}: {error}")
-            return None
-        if not today_documents:
-            errors.append(f"O índice {index_name} não possui documentos com @timestamp de hoje.")
-            return None
-        details.append(f"Índice {index_name}: {len(today_documents)} documento(s) de hoje e {len(yesterday_documents)} de ontem.")
-        return IndexSnapshot(index_name, today_documents, yesterday_documents)
-
-    def _validate_document_variation(self, snapshot: IndexSnapshot, errors: list[str], details: list[str], label: str) -> None:
-        previous, current = len(snapshot.yesterday_documents), len(snapshot.today_documents)
-        if previous and current < previous * (1 - self._maximum_variation):
-            errors.append(f"Queda brusca em {label}: ontem={previous}, hoje={current}.")
-        else:
-            details.append(f"Variação de {label} dentro do limite: ontem={previous}, hoje={current}.")
-
-    def _validate_asset_classification(self, documents: list[dict[str, Any]], errors: list[str], details: list[str]) -> None:
-        for field in ("asset.importance", "asset.owner", "asset.tags"):
-            populated = sum(bool(self._nested(self._source(document), field)) for document in documents)
-            ratio = populated / len(documents)
-            details.append(f"Classificação {field}: {populated}/{len(documents)} preenchidos.")
-            if ratio < 1 - self._maximum_variation:
-                errors.append(f"Campo de classificação '{field}' pouco preenchido: {ratio:.0%}.")
-
-    def _validate_positive_asset_score(self, documents: list[dict[str, Any]], errors: list[str], details: list[str]) -> None:
-        scores = [self._nested(self._source(document), "asset.score") for document in documents]
-        valid = [score for score in scores if isinstance(score, (int, float)) and score > 0]
-        details.append(f"Ativos com score positivo: {len(valid)}/{len(documents)}.")
-        if len(valid) != len(documents):
-            errors.append("Existem documentos de clavis_asset sem score positivo.")
-
-    def _validate_numeric_variation(self, snapshot: IndexSnapshot, errors: list[str], details: list[str], label: str) -> None:
-        if not snapshot.yesterday_documents:
-            details.append(f"Sem documentos de ontem para comparar {label}.")
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documento mais recente: "
+                f"{error.__class__.__name__}: {error}"
+            )
             return
-        current = self._numeric_total(self._source(snapshot.today_documents[0]))
-        previous = self._numeric_total(self._source(snapshot.yesterday_documents[0]))
-        if previous == 0:
-            details.append(f"Comparativo de {label} sem base numérica anterior.")
-            return
-        variation = abs(current - previous) / abs(previous)
-        details.append(f"Variação de {label}: {variation:.0%}.")
-        if variation > self._maximum_variation:
-            errors.append(f"Variação brusca em {label}: {variation:.0%}.")
 
-    def _has_current_month_document(self, documents: list[dict[str, Any]]) -> bool:
-        for document in documents:
-            timestamp = self._source(document).get("@timestamp")
-            if isinstance(timestamp, str):
-                parsed = self._parse_timestamp(timestamp)
-                if parsed and (parsed.year, parsed.month) == (self._reference_date.year, self._reference_date.month):
-                    return True
-        return False
+        if document is None:
+            errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
+            return
+
+        timestamp = self._source(document).get("@timestamp")
+        document_date = self._parse_date(timestamp)
+        if document_date is None:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente sem @timestamp válido."
+            )
+            return
+        try:
+            previous_day_documents = self._repository.get_previous_day_documents(
+                index_name,
+                timestamp,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos do dia anterior "
+                f"a {document_date.isoformat()}: {error.__class__.__name__}: {error}"
+            )
+            return
+
+        previous_day = document_date - timedelta(days=1)
+        details.append(
+            f"Índice '{index_name}' | @timestamp mais recente: {timestamp}; "
+            f"documentos em {previous_day.isoformat()}: {len(previous_day_documents)}."
+        )
+        if not previous_day_documents:
+            errors.append(
+                f"Índice '{index_name}' não possui documentos no dia anterior "
+                f"ao mais recente ({previous_day.isoformat()})."
+            )
+        if document_date != self._reference_date:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente com @timestamp "
+                f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+            return
+
+        details.append(
+            f"Índice '{index_name}' possui {index.document_count} documento(s); "
+            "documento mais recente é de hoje."
+        )
 
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
         return document.get("_source", document)
 
     @staticmethod
-    def _nested(source: dict[str, Any], path: str) -> Any:
-        value: Any = source
-        for key in path.split("."):
-            if not isinstance(value, dict):
-                return None
-            value = value.get(key)
-        return value
-
-    @classmethod
-    def _flatten(cls, value: Any, prefix: str = "") -> Iterable[tuple[str, Any]]:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                yield from cls._flatten(child, f"{prefix}.{key}" if prefix else key)
-        else:
-            yield prefix, value
-
-    @classmethod
-    def _numeric_total(cls, source: dict[str, Any]) -> float:
-        return float(sum(value for _, value in cls._flatten(source) if isinstance(value, (int, float))))
-
-    @staticmethod
-    def _parse_timestamp(value: str) -> datetime | None:
+    def _parse_date(value: object) -> date | None:
+        if not isinstance(value, str):
+            return None
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
         except ValueError:
             return None

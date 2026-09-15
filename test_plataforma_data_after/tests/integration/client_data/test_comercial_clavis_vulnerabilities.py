@@ -20,7 +20,7 @@ def _assert_validation(results: list[tuple[str, list[str], list[str]]]) -> None:
     assert not failures, "\n".join(failures)
 
 
-@allure.title("Validar ativos e variação de inventário")
+@allure.title("Validar ativos e atualização de índices")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -71,7 +71,7 @@ def test_should_validate_software_policies_after_pipeline(
     _assert_validation(results)
 
 
-@allure.title("Validar score e variação")
+@allure.title("Validar índice de score")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -88,7 +88,7 @@ def test_should_validate_score_history_after_pipeline(
     _assert_validation(results)
 
 
-@allure.title("Validar OTO Dashboard e variação")
+@allure.title("Validar índice OTO Dashboard")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
