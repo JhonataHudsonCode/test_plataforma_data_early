@@ -168,7 +168,7 @@ class ProductDataValidator:
                 f"ao mais recente ({previous_day.isoformat()})."
             )
         else:
-            self._validate_monitored_assets_variation(
+            self._validate_assets_variation(
                 index_name,
                 document,
                 previous_day_documents[0],
@@ -188,7 +188,7 @@ class ProductDataValidator:
             "documento mais recente é de hoje."
         )
 
-    def _validate_monitored_assets_variation(
+    def _validate_assets_variation(
         self,
         index_name: str,
         latest_document: dict[str, Any],
@@ -196,22 +196,36 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Garante que os indicadores monitorados não cresçam mais de 50% ao dia."""
-        latest_asset = self._source(latest_document).get("asset")
-        previous_asset = self._source(previous_document).get("asset")
-        if not isinstance(latest_asset, dict) or not isinstance(previous_asset, dict):
+        """Garante que os indicadores do índice não cresçam mais de 50% ao dia."""
+        if index_name.endswith("_asset-historical-software"):
+            latest_values = self._source(latest_document)
+            previous_values = self._source(previous_document)
+            fields = (
+                "assets_total",
+                "assets_missing_mandatory_softwares",
+                "assets_with_unauthorized_softwares",
+            )
+            field_prefix = ""
+        else:
+            latest_values = self._source(latest_document).get("asset")
+            previous_values = self._source(previous_document).get("asset")
+            fields = ("monitored_vulns", "monitored_events")
+            field_prefix = "asset."
+
+        if not isinstance(latest_values, dict) or not isinstance(previous_values, dict):
             errors.append(
-                f"Índice '{index_name}' | campo asset ausente nos documentos "
+                f"Índice '{index_name}' | dados esperados ausentes nos documentos "
                 "mais recente ou do dia anterior."
             )
             return
 
-        for field in ("monitored_vulns", "monitored_events"):
-            current_value = latest_asset.get(field)
-            previous_value = previous_asset.get(field)
+        for field in fields:
+            field_name = f"{field_prefix}{field}"
+            current_value = latest_values.get(field)
+            previous_value = previous_values.get(field)
             if not self._is_number(current_value) or not self._is_number(previous_value):
                 errors.append(
-                    f"Índice '{index_name}' | asset.{field} deve ser numérico nos "
+                    f"Índice '{index_name}' | {field_name} deve ser numérico nos "
                     "documentos mais recente e do dia anterior."
                 )
                 continue
@@ -220,30 +234,30 @@ class ProductDataValidator:
             previous = float(previous_value)
             if previous < 0 or current < 0:
                 errors.append(
-                    f"Índice '{index_name}' | asset.{field} não pode possuir valor negativo "
+                    f"Índice '{index_name}' | {field_name} não pode possuir valor negativo "
                     f"(anterior={previous_value}, mais recente={current_value})."
                 )
                 continue
             if previous == 0:
                 if current > 0:
                     errors.append(
-                        f"Índice '{index_name}' | asset.{field} aumentou de 0 para "
+                        f"Índice '{index_name}' | {field_name} aumentou de 0 para "
                         f"{current_value}; excede o limite de 50%."
                     )
                 else:
                     details.append(
-                        f"Índice '{index_name}' | asset.{field}: sem variação (0 para 0)."
+                        f"Índice '{index_name}' | {field_name}: sem variação (0 para 0)."
                     )
                 continue
 
             variation = (current - previous) / previous
             details.append(
-                f"Índice '{index_name}' | asset.{field}: anterior={previous_value}, "
+                f"Índice '{index_name}' | {field_name}: anterior={previous_value}, "
                 f"mais recente={current_value}, variação={variation:.0%}."
             )
             if variation > 0.5:
                 errors.append(
-                    f"Índice '{index_name}' | asset.{field} aumentou {variation:.0%} "
+                    f"Índice '{index_name}' | {field_name} aumentou {variation:.0%} "
                     f"(anterior={previous_value}, mais recente={current_value}); "
                     "máximo permitido: 50%."
                 )
