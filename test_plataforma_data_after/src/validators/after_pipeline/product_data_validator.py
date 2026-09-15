@@ -363,6 +363,71 @@ class ProductDataValidator:
                     "máximo permitido: 50%."
                 )
 
+        if "_asset_" in index_name:
+            self._validate_asset_events_equality(
+                index_name,
+                latest_values,
+                previous_values,
+                errors,
+                details,
+            )
+
+    def _validate_asset_events_equality(
+        self,
+        index_name: str,
+        latest_asset: dict[str, Any],
+        previous_asset: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida campos estáveis de asset_events entre os índices diários de ativos."""
+        latest_events = latest_asset.get("asset_events", latest_asset.get("assets_events"))
+        previous_events = previous_asset.get("asset_events", previous_asset.get("assets_events"))
+        if not isinstance(latest_events, dict) or not isinstance(previous_events, dict):
+            errors.append(
+                f"Índice '{index_name}' | asset_events ausente nos documentos "
+                "mais recente ou do dia anterior."
+            )
+            return
+
+        latest_compliance = latest_events.get("compliance")
+        previous_compliance = previous_events.get("compliance")
+        if not isinstance(latest_compliance, dict) or not isinstance(previous_compliance, dict):
+            errors.append(
+                f"Índice '{index_name}' | asset_events.compliance ausente nos documentos "
+                "mais recente ou do dia anterior."
+            )
+            return
+
+        fields = (
+            (
+                "asset_events.compliance.total_checks",
+                latest_compliance.get("total_checks"),
+                previous_compliance.get("total_checks"),
+            ),
+            (
+                "asset_events.technology",
+                latest_events.get("technology", latest_compliance.get("technology")),
+                previous_events.get("technology", previous_compliance.get("technology")),
+            ),
+        )
+        for field_name, current_value, previous_value in fields:
+            if current_value is None or previous_value is None:
+                errors.append(
+                    f"Índice '{index_name}' | {field_name} ausente nos documentos "
+                    "mais recente ou do dia anterior."
+                )
+            elif current_value != previous_value:
+                errors.append(
+                    f"Índice '{index_name}' | {field_name} divergente entre os índices: "
+                    f"anterior={previous_value!r}, mais recente={current_value!r}."
+                )
+            else:
+                details.append(
+                    f"Índice '{index_name}' | {field_name} igual nos índices de hoje e ontem: "
+                    f"{current_value!r}."
+                )
+
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
         return document.get("_source", document)
