@@ -1,10 +1,10 @@
 import os
 import smtplib
 import mimetypes
+from html import escape
 from email.message import EmailMessage
 from datetime import datetime
 from pathlib import Path
-from src.services.allure_service import AllureService
 
 from dotenv import load_dotenv
 
@@ -100,12 +100,11 @@ class EmailService:
     def send_email(
         self, 
         subject: str, 
-        body: str, 
+        body: str,
+        html_body: str | None = None,
     ) -> bool:
 
         msg = EmailMessage()
-        allure_service = AllureService()
-        html_table = allure_service.generate_html_table()
 
         msg["To"] = self.smtp_recipents
         msg["From"] = self.smtp_from
@@ -113,7 +112,10 @@ class EmailService:
 
         msg.set_content(body)
         msg.add_alternative(
-            html_table,
+            html_body or (
+                "<pre style='white-space:pre-wrap;font-family:monospace;'>"
+                f"{escape(body)}</pre>"
+            ),
             subtype="html"
         )
 

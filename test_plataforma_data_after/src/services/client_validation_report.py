@@ -190,6 +190,53 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         return "\n".join(bdd_lines).strip()
 
     @staticmethod
+    def email_html_from_text(report_path: str | Path) -> str:
+        """Versão com estilos inline para clientes de e-mail."""
+        report = Path(report_path).read_text(encoding="utf-8")
+        title = next(
+            (line.removeprefix("Teste: ") for line in report.splitlines() if line.startswith("Teste:")),
+            "Relatório de validação",
+        )
+        environment = next(
+            (line.removeprefix("Ambiente: ") for line in report.splitlines() if line.startswith("Ambiente:")),
+            "hml",
+        )
+        sections = ClientValidationReport._parse_sections(report)
+        tones = {
+            "Falhas": ("#b42318", "#fff1f0"),
+            "Informativos": ("#9a6700", "#fff8e6"),
+            "Aprovados": ("#16734a", "#edf9f2"),
+        }
+
+        def render_section(name: str) -> str:
+            color, background = tones[name]
+            rows = "".join(
+                f'<tr><td style="padding:14px 16px;border:1px solid #dfe5ea;'
+                f'border-left:4px solid {color};background:{background};font-family:Arial,sans-serif;">'
+                f'<strong>{escape(client_id)}</strong><ul style="margin:8px 0 0;padding-left:20px;">'
+                + "".join(f"<li style=\"margin:4px 0;\">{escape(message)}</li>" for message in messages)
+                + "</ul></td></tr>"
+                for client_id, messages in sections[name]
+            ) or '<tr><td style="padding:14px 16px;border:1px solid #dfe5ea;color:#64717d;">Nenhum registro.</td></tr>'
+            return (
+                f'<h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">'
+                f'{name} ({len(sections[name])})</h2>'
+                f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
+                f'style="border-collapse:collapse;">{rows}</table>'
+            )
+
+        metrics = "".join(
+            f'<td width="33%" style="padding:14px 12px;border-top:4px solid {color};background:{background};font-family:Arial,sans-serif;">'
+            f'<div style="font-size:12px;font-weight:bold;color:#64717d;">{name.upper()}</div>'
+            f'<div style="font-size:30px;font-weight:bold;color:{color};margin-top:4px;">{len(sections[name])}</div></td>'
+            for name, (color, background) in tones.items()
+        )
+        generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+        bdd = escape(ClientValidationReport._bdd_from_report(report)).replace("\n", "<br>")
+        return f"""<!doctype html><html lang="pt-BR"><body style="margin:0;padding:0;background:#eef2f5;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2f5;"><tr><td style="padding:24px 12px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px;margin:0 auto;background:#ffffff;"><tr><td style="padding:28px 30px;background:#18324a;font-family:Arial,sans-serif;color:#ffffff;"><div style="font-size:11px;font-weight:bold;letter-spacing:1px;color:#b9c9d7;">RELATÓRIO DE VALIDAÇÃO POR CLIENTE</div><h1 style="font-size:27px;margin:9px 0 10px;color:#ffffff;">{escape(title)}</h1><p style="margin:0;color:#d7e2eb;">Ambiente: <strong>{escape(environment)}</strong> &middot; Gerado em {generated_at}</p></td></tr><tr><td style="padding:20px 22px;"><table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metrics}</tr></table><h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">BDD executado</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="padding:14px 16px;border:1px solid #dfe5ea;border-left:4px solid #7591a7;background:#f7f9fb;font:14px/1.5 Arial,sans-serif;color:#34495a;">{bdd}</td></tr></table>{render_section("Falhas")}{render_section("Informativos")}{render_section("Aprovados")}</td></tr></table></td></tr></table></body></html>"""
+
+    @staticmethod
     def _parse_sections(report: str) -> dict[str, list[tuple[str, list[str]]]]:
         sections: dict[str, list[tuple[str, list[str]]]] = {
             "Falhas": [], "Informativos": [], "Aprovados": []
