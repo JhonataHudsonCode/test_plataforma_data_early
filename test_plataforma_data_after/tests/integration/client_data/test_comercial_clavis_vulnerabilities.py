@@ -1,23 +1,51 @@
 from __future__ import annotations
 
+import inspect
+
 import allure
 import pytest
 
 from src.config.settings import ClientTarget
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
+from src.services.client_validation_report import ClientValidationReport
 from src.validators.after_pipeline.product_data_validator import ProductDataValidator
 
 
-def _assert_validation(results: list[tuple[str, list[str], list[str]]]) -> None:
+def _save_client_report(report: ClientValidationReport, test_name: str) -> None:
+    report_path = f"reports/client-validation/{test_name}.txt"
+    report.write(
+        report_path,
+        ClientValidationReport.allure_title_from_source(__file__, test_name),
+        ClientValidationReport.bdd_from_test_name(test_name),
+    )
+    report.close()
+    ClientValidationReport.write_html_from_text(
+        report_path,
+        report_path.removesuffix(".txt") + ".html",
+    )
+
+
+def _assert_validation(
+    results: list[tuple[str, list[str], list[str]]],
+    test_name: str,
+) -> None:
+    report = ClientValidationReport()
     for client_id, errors, details in results:
+        infos = [detail for detail in details if "índices não aplicáveis" in detail]
+        report.add_client_result(
+            client_id,
+            failures=errors,
+            infos=infos,
+            details=[detail for detail in details if detail not in infos],
+        )
         allure.attach(
             "\n".join(details + errors),
             name=f"Validação pós-pipeline - {client_id}",
             attachment_type=allure.attachment_type.TEXT,
         )
-    failures = [f"{client_id}: {error}" for client_id, errors, _ in results for error in errors]
-    assert not failures, "\n".join(failures)
+    _save_client_report(report, test_name)
+    report.assert_no_failures()
 
 
 @allure.title("Validar ativos e atualização de índices")
@@ -34,7 +62,7 @@ def test_should_validate_assets_and_inventory_variation_after_pipeline(
         (target.client_id, *validator.validate_assets(target))
         for target in client_targets
     ]
-    _assert_validation(results)
+    _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
 @allure.title("Validar dados de compliance")
@@ -51,7 +79,7 @@ def test_should_validate_compliance_after_pipeline(
         (target.client_id, *validator.validate_compliance(target))
         for target in client_targets
     ]
-    _assert_validation(results)
+    _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
 @allure.title("Validar softwares obrigatórios e homologados")
@@ -68,7 +96,7 @@ def test_should_validate_software_policies_after_pipeline(
         (target.client_id, *validator.validate_software_policies(target))
         for target in client_targets
     ]
-    _assert_validation(results)
+    _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
 @allure.title("Validar índice de score")
@@ -85,7 +113,7 @@ def test_should_validate_score_history_after_pipeline(
         (target.client_id, *validator.validate_score_history(target))
         for target in client_targets
     ]
-    _assert_validation(results)
+    _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
 @allure.title("Validar índice OTO Dashboard")
@@ -102,4 +130,4 @@ def test_should_validate_oto_dashboard_after_pipeline(
         (target.client_id, *validator.validate_oto_dashboard(target))
         for target in client_targets
     ]
-    _assert_validation(results)
+    _assert_validation(results, inspect.currentframe().f_code.co_name)

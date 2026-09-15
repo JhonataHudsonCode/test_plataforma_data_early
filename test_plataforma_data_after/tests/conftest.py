@@ -47,6 +47,7 @@ def pytest_sessionstart(session):
     if allure_results_path.exists() and allure_results_path.is_dir():
         shutil.rmtree(allure_results_path)
     allure_results_path.mkdir(parents=True, exist_ok=True)
+    Path("reports/client-validation").mkdir(parents=True, exist_ok=True)
 
 def pytest_sessionfinish(session, exitstatus):
     """
