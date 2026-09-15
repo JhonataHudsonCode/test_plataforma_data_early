@@ -9,6 +9,7 @@ from src.connections.postgres import PostgresConnection
 from src.models.client_metadata import ClientMetadata
 from src.queries.cognito_client_queries import (
     SELECT_ALL_CLIENTS,
+    SELECT_CLIENT_BY_ID,
     SELECT_COGNITO_CLIENT_BY_ID,
 )
 
@@ -57,6 +58,17 @@ class CognitoClientRepository:
             rows = cursor.fetchall()
 
         return [dict(row) for row in rows]
+
+    def get_client(self, schema_name: str, client_id: str) -> dict[str, Any] | None:
+        """Retorna os dados e as flags de um cliente para validar sua aplicabilidade."""
+        query = sql.SQL(SELECT_CLIENT_BY_ID).format(
+            schema_name=sql.Identifier(schema_name),
+        )
+        with self._connection.client.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, (client_id,))
+            row = cursor.fetchone()
+
+        return None if row is None else dict(row)
 
  
     @staticmethod

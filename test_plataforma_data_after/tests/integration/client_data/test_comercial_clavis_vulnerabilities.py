@@ -3,39 +3,10 @@ from __future__ import annotations
 import allure
 import pytest
 
+from src.config.settings import ClientTarget
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
-from src.config.settings import ClientTarget
 from src.validators.after_pipeline.product_data_validator import ProductDataValidator
-
-
-CLIENT_SCHEMA = "public"
-
-
-def _selected_clients(
-    repository: CognitoClientRepository,
-    client_targets: list[ClientTarget],
-    required_flag: str | None = None,
-) -> list[dict[str, object]]:
-    """Retorna somente os clientes definidos pela fonte de seleção atual."""
-    clients_by_id = {
-        str(client["client_id"]): client
-        for client in repository.list_clients(CLIENT_SCHEMA)
-    }
-    missing_client_ids = [
-        target.client_id
-        for target in client_targets
-        if target.client_id not in clients_by_id
-    ]
-    assert not missing_client_ids, (
-        "Clientes informados em CLIENT_SELECTION_SOURCE=credentials não foram "
-        f"encontrados no Cognito: {', '.join(missing_client_ids)}."
-    )
-
-    clients = [clients_by_id[target.client_id] for target in client_targets]
-    if required_flag is None:
-        return clients
-    return [client for client in clients if bool(client.get(required_flag))]
 
 
 def _assert_validation(results: list[tuple[str, list[str], list[str]]]) -> None:
@@ -58,10 +29,10 @@ def test_should_validate_assets_and_inventory_variation_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets: list[ClientTarget],
 ) -> None:
-    validator = ProductDataValidator(product_repository)
+    validator = ProductDataValidator(product_repository, cognito_client_repository)
     results = [
-        (str(client["client_id"]), *validator.validate_assets(str(client["client_id"])))
-        for client in _selected_clients(cognito_client_repository, client_targets, "has_asset")
+        (target.client_id, *validator.validate_assets(target))
+        for target in client_targets
     ]
     _assert_validation(results)
 
@@ -75,10 +46,10 @@ def test_should_validate_compliance_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets: list[ClientTarget],
 ) -> None:
-    validator = ProductDataValidator(product_repository)
+    validator = ProductDataValidator(product_repository, cognito_client_repository)
     results = [
-        (str(client["client_id"]), *validator.validate_compliance(str(client["client_id"])))
-        for client in _selected_clients(cognito_client_repository, client_targets, "has_wazuh")
+        (target.client_id, *validator.validate_compliance(target))
+        for target in client_targets
     ]
     _assert_validation(results)
 
@@ -92,10 +63,10 @@ def test_should_validate_software_policies_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets: list[ClientTarget],
 ) -> None:
-    validator = ProductDataValidator(product_repository)
+    validator = ProductDataValidator(product_repository, cognito_client_repository)
     results = [
-        (str(client["client_id"]), *validator.validate_software_policies(str(client["client_id"])))
-        for client in _selected_clients(cognito_client_repository, client_targets, "has_asset")
+        (target.client_id, *validator.validate_software_policies(target))
+        for target in client_targets
     ]
     _assert_validation(results)
 
@@ -109,11 +80,10 @@ def test_should_validate_score_history_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets: list[ClientTarget],
 ) -> None:
-    validator = ProductDataValidator(product_repository)
+    validator = ProductDataValidator(product_repository, cognito_client_repository)
     results = [
-        (str(client["client_id"]), *validator.validate_score_history(str(client["client_id"]), client))
-        for client in _selected_clients(cognito_client_repository, client_targets)
-        if client.get("is_in_platform", True)
+        (target.client_id, *validator.validate_score_history(target))
+        for target in client_targets
     ]
     _assert_validation(results)
 
@@ -127,10 +97,9 @@ def test_should_validate_oto_dashboard_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets: list[ClientTarget],
 ) -> None:
-    validator = ProductDataValidator(product_repository)
+    validator = ProductDataValidator(product_repository, cognito_client_repository)
     results = [
-        (str(client["client_id"]), *validator.validate_oto_dashboard(str(client["client_id"])))
-        for client in _selected_clients(cognito_client_repository, client_targets)
-        if bool(client.get("is_saas"))
+        (target.client_id, *validator.validate_oto_dashboard(target))
+        for target in client_targets
     ]
     _assert_validation(results)

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Iterable
 
+from src.config.settings import ClientTarget
+from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 
 
@@ -17,13 +19,23 @@ class IndexSnapshot:
 class ProductDataValidator:
     """Valida os índices de produto produzidos pelo pipeline pós-processamento."""
 
-    def __init__(self, repository: OpenSearchVulnerabilityRepository, reference_date: date | None = None, maximum_variation: float = 0.80) -> None:
+    def __init__(
+        self,
+        repository: OpenSearchVulnerabilityRepository,
+        cognito_repository: CognitoClientRepository,
+        reference_date: date | None = None,
+        maximum_variation: float = 0.80,
+    ) -> None:
         self._repository = repository
+        self._cognito_repository = cognito_repository
         self._reference_date = reference_date or date.today()
         self._maximum_variation = maximum_variation
 
-    def validate_assets(self, client_id: str) -> tuple[list[str], list[str]]:
-        errors, details = [], []
+    def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+        client_id = target.client_id
         asset = self._snapshot(f"{client_id}_asset", errors, details)
         observability = self._snapshot(f"{client_id}_asset-historical-observability", errors, details)
         software = self._snapshot(f"{client_id}_asset-historical-software", errors, details)
@@ -37,14 +49,33 @@ class ProductDataValidator:
             self._validate_document_variation(software, errors, details, "histórico de software")
         return errors, details
 
-    def validate_compliance(self, client_id: str) -> tuple[list[str], list[str]]:
-        return self._validate_current_indices(client_id, ("asset-compliance", "asset-policy-compliance"))
+    def validate_compliance(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "has_wazuh")
+        if client is None:
+            return errors, details
+        client_id = target.client_id
+        index_errors, index_details = self._validate_current_indices(
+            client_id,
+            ("asset-compliance", "asset-policy-compliance"),
+        )
+        return errors + index_errors, details + index_details
 
-    def validate_software_policies(self, client_id: str) -> tuple[list[str], list[str]]:
-        return self._validate_current_indices(client_id, ("authorized-software", "mandatory-software"))
+    def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+        client_id = target.client_id
+        index_errors, index_details = self._validate_current_indices(
+            client_id,
+            ("authorized-software", "mandatory-software"),
+        )
+        return errors + index_errors, details + index_details
 
-    def validate_score_history(self, client_id: str, client: dict[str, object]) -> tuple[list[str], list[str]]:
-        errors, details = [], []
+    def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "is_in_platform")
+        if client is None:
+            return errors, details
+        client_id = target.client_id
         snapshot = self._snapshot(f"{client_id}_score_history", errors, details)
         if not snapshot:
             return errors, details
@@ -66,12 +97,43 @@ class ProductDataValidator:
         self._validate_numeric_variation(snapshot, errors, details, "score")
         return errors, details
 
-    def validate_oto_dashboard(self, client_id: str) -> tuple[list[str], list[str]]:
-        errors, details = [], []
+    def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "is_saas")
+        if client is None:
+            return errors, details
+        client_id = target.client_id
         snapshot = self._snapshot(f"{client_id}_oto_dashboard", errors, details)
         if snapshot:
             self._validate_numeric_variation(snapshot, errors, details, "métricas do OTO Dashboard")
         return errors, details
+
+    def _get_applicable_client(
+        self,
+        target: ClientTarget,
+        expected_flag: str,
+    ) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+        try:
+            client = self._cognito_repository.get_client("public", target.client_id)
+        except Exception as error:
+            return None, [
+                f"Cliente '{target.client_id}' | erro ao consultar o Cognito: "
+                f"{error.__class__.__name__}: {error}"
+            ], []
+
+        if client is None:
+            return None, [], [
+                f"Cliente '{target.client_id}' não encontrado no Cognito; "
+                "índices não aplicáveis."
+            ]
+        if not bool(client.get(expected_flag)):
+            return None, [], [
+                f"Cliente '{target.client_id}' possui {expected_flag} desabilitado no Cognito; "
+                "índices não aplicáveis."
+            ]
+
+        return client, [], [
+            f"Cliente '{target.client_id}' | Cognito validado: {expected_flag} habilitado."
+        ]
 
     def _validate_current_indices(self, client_id: str, suffixes: Iterable[str]) -> tuple[list[str], list[str]]:
         errors, details = [], []

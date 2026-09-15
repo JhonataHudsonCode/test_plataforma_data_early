@@ -24,3 +24,9 @@ SELECT *
 FROM {schema_name}.clients
 ORDER BY client_id;
 """
+
+SELECT_CLIENT_BY_ID = """
+SELECT *
+FROM {schema_name}.clients
+WHERE client_id = %s;
+"""
