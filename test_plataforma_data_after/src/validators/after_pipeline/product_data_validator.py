@@ -22,15 +22,14 @@ class ProductDataValidator:
         self._reference_date = reference_date or date.today()
 
     def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(
-            target,
-            "has_asset",
-            (
-                ("asset", "date"),
-                ("asset-historical-observability", "date"),
-                ("asset-historical-software", "date"),
-            ),
-        )
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+
+        self._validate_dated_asset_indices(target.client_id, errors, details)
+        for suffix in ("asset-historical-observability", "asset-historical-software"):
+            self._validate_index(f"{target.client_id}_{suffix}", "date", errors, details)
+        return errors, details
 
     def validate_compliance(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         return self._validate_module_indices(
@@ -71,13 +70,7 @@ class ProductDataValidator:
             return errors, details
 
         for suffix, timestamp_field in index_definitions:
-            index_name = self._resolve_index_name(
-                target.client_id,
-                suffix,
-                errors,
-            )
-            if index_name is None:
-                continue
+            index_name = f"{target.client_id}_{suffix}"
             self._validate_index(
                 index_name,
                 timestamp_field,
@@ -86,34 +79,106 @@ class ProductDataValidator:
             )
         return errors, details
 
-    def _resolve_index_name(
+    def _validate_dated_asset_indices(
         self,
         client_id: str,
-        suffix: str,
         errors: list[str],
-    ) -> str | None:
-        if suffix != "asset":
-            return f"{client_id}_{suffix}"
-
+        details: list[str],
+    ) -> None:
         index_prefix = f"{client_id}_asset_"
+        previous_date = self._reference_date - timedelta(days=1)
         try:
-            index_name = self._repository.get_index_name_for_date(
+            index_names = self._repository.get_index_names_for_dates(
                 index_prefix,
-                self._reference_date,
+                (self._reference_date, previous_date),
             )
         except Exception as error:
             errors.append(
-                f"Índice de ativos com prefixo '{index_prefix}' | erro ao localizar a data "
-                f"{self._reference_date.strftime('%Y%m%d')}: {error.__class__.__name__}: {error}"
+                f"Índices de ativos com prefixo '{index_prefix}' | erro ao localizar "
+                f"as datas {self._reference_date.isoformat()} e {previous_date.isoformat()}: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        current_index_name = index_names.get(self._reference_date)
+        previous_index_name = index_names.get(previous_date)
+        if current_index_name is None:
+            errors.append(
+                f"Índice de ativos não encontrado para o prefixo '{index_prefix}' e data "
+                f"{self._reference_date.isoformat()}."
+            )
+        if previous_index_name is None:
+            errors.append(
+                f"Índice de ativos não encontrado para o prefixo '{index_prefix}' e data "
+                f"{previous_date.isoformat()}."
+            )
+        if current_index_name is None or previous_index_name is None:
+            return
+
+        current_document = self._validate_dated_index_document(
+            current_index_name,
+            self._reference_date,
+            errors,
+            details,
+        )
+        previous_document = self._validate_dated_index_document(
+            previous_index_name,
+            previous_date,
+            errors,
+            details,
+        )
+        if current_document is not None and previous_document is not None:
+            self._validate_assets_variation(
+                current_index_name,
+                current_document,
+                previous_document,
+                errors,
+                details,
+            )
+
+    def _validate_dated_index_document(
+        self,
+        index_name: str,
+        expected_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, Any] | None:
+        try:
+            index = next(
+                (item for item in self._repository.get_indices(index_name) if item.name == index_name),
+                None,
+            )
+            if index is None:
+                errors.append(f"Índice '{index_name}' não encontrado.")
+                return None
+            if index.document_count <= 0:
+                errors.append(f"Índice '{index_name}' não possui documentos.")
+                return None
+            document = self._repository.get_latest_document(index_name, "date")
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documento mais recente: "
+                f"{error.__class__.__name__}: {error}"
             )
             return None
 
-        if index_name is None:
+        if document is None:
+            errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
+            return None
+
+        document_date = self._parse_date(self._source(document).get("date"))
+        if document_date != expected_date:
             errors.append(
-                f"Índice de ativos não encontrado para o prefixo '{index_prefix}' e data "
-                f"{self._reference_date.strftime('%Y%m%d')}."
+                f"Índice '{index_name}' | documento mais recente com date "
+                f"{self._source(document).get('date', 'não informado')}; esperado "
+                f"{expected_date.isoformat()}."
             )
-        return index_name
+            return None
+        details.append(
+            f"Índice '{index_name}' validado: {index.document_count} documento(s); "
+            f"date mais recente: {self._source(document).get('date')}."
+        )
+        return document
 
     def _get_applicable_client(
         self,
