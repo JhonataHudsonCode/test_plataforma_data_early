@@ -71,13 +71,49 @@ class ProductDataValidator:
             return errors, details
 
         for suffix, timestamp_field in index_definitions:
+            index_name = self._resolve_index_name(
+                target.client_id,
+                suffix,
+                errors,
+            )
+            if index_name is None:
+                continue
             self._validate_index(
-                f"{target.client_id}_{suffix}",
+                index_name,
                 timestamp_field,
                 errors,
                 details,
             )
         return errors, details
+
+    def _resolve_index_name(
+        self,
+        client_id: str,
+        suffix: str,
+        errors: list[str],
+    ) -> str | None:
+        if suffix != "asset":
+            return f"{client_id}_{suffix}"
+
+        index_prefix = f"{client_id}_asset_"
+        try:
+            index_name = self._repository.get_index_name_for_date(
+                index_prefix,
+                self._reference_date,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice de ativos com prefixo '{index_prefix}' | erro ao localizar a data "
+                f"{self._reference_date.strftime('%Y%m%d')}: {error.__class__.__name__}: {error}"
+            )
+            return None
+
+        if index_name is None:
+            errors.append(
+                f"Índice de ativos não encontrado para o prefixo '{index_prefix}' e data "
+                f"{self._reference_date.strftime('%Y%m%d')}."
+            )
+        return index_name
 
     def _get_applicable_client(
         self,
