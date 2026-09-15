@@ -26,9 +26,9 @@ class ProductDataValidator:
             target,
             "has_asset",
             (
-                "asset",
-                "asset-historical-observability",
-                "asset-historical-software",
+                ("asset", "date"),
+                ("asset-historical-observability", "date"),
+                ("asset-historical-software", "date"),
             ),
         )
 
@@ -36,34 +36,47 @@ class ProductDataValidator:
         return self._validate_module_indices(
             target,
             "has_wazuh",
-            ("asset-compliance", "asset-policy-compliance"),
+            (("asset-compliance", "@timestamp"), ("asset-policy-compliance", "@timestamp")),
         )
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         return self._validate_module_indices(
             target,
             "has_asset",
-            ("authorized-software", "mandatory-software"),
+            (("authorized-software", "@timestamp"), ("mandatory-software", "@timestamp")),
         )
 
     def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(target, "is_in_platform", ("score_history",))
+        return self._validate_module_indices(
+            target,
+            "is_in_platform",
+            (("score_history", "@timestamp"),),
+        )
 
     def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(target, "is_saas", ("oto_dashboard",))
+        return self._validate_module_indices(
+            target,
+            "is_saas",
+            (("oto_dashboard", "@timestamp"),),
+        )
 
     def _validate_module_indices(
         self,
         target: ClientTarget,
         expected_flag: str,
-        index_suffixes: Iterable[str],
+        index_definitions: Iterable[tuple[str, str]],
     ) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, expected_flag)
         if client is None:
             return errors, details
 
-        for suffix in index_suffixes:
-            self._validate_index(f"{target.client_id}_{suffix}", errors, details)
+        for suffix, timestamp_field in index_definitions:
+            self._validate_index(
+                f"{target.client_id}_{suffix}",
+                timestamp_field,
+                errors,
+                details,
+            )
         return errors, details
 
     def _get_applicable_client(
@@ -96,6 +109,7 @@ class ProductDataValidator:
     def _validate_index(
         self,
         index_name: str,
+        timestamp_field: str,
         errors: list[str],
         details: list[str],
     ) -> None:
@@ -111,7 +125,7 @@ class ProductDataValidator:
                 errors.append(f"Índice '{index_name}' não possui documentos.")
                 return
 
-            document = self._repository.get_latest_document(index_name)
+            document = self._repository.get_latest_document(index_name, timestamp_field)
         except Exception as error:
             errors.append(
                 f"Índice '{index_name}' | erro ao consultar documento mais recente: "
@@ -123,17 +137,18 @@ class ProductDataValidator:
             errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
             return
 
-        timestamp = self._source(document).get("@timestamp")
+        timestamp = self._source(document).get(timestamp_field)
         document_date = self._parse_date(timestamp)
         if document_date is None:
             errors.append(
-                f"Índice '{index_name}' | documento mais recente sem @timestamp válido."
+                f"Índice '{index_name}' | documento mais recente sem {timestamp_field} válido."
             )
             return
         try:
             previous_day_documents = self._repository.get_previous_day_documents(
                 index_name,
                 timestamp,
+                timestamp_field,
             )
         except Exception as error:
             errors.append(
@@ -144,7 +159,7 @@ class ProductDataValidator:
 
         previous_day = document_date - timedelta(days=1)
         details.append(
-            f"Índice '{index_name}' | @timestamp mais recente: {timestamp}; "
+            f"Índice '{index_name}' | {timestamp_field} mais recente: {timestamp}; "
             f"documentos em {previous_day.isoformat()}: {len(previous_day_documents)}."
         )
         if not previous_day_documents:
@@ -154,7 +169,7 @@ class ProductDataValidator:
             )
         if document_date != self._reference_date:
             errors.append(
-                f"Índice '{index_name}' | documento mais recente com @timestamp "
+                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
                 f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
                 f"esperado {self._reference_date.isoformat()}."
             )
