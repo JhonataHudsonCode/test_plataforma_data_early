@@ -41,7 +41,6 @@ class ProductDataValidator:
             target,
             "has_wazuh",
             (("asset-compliance", "@timestamp"), ("asset-policy-compliance", "@timestamp")),
-            allow_date_suffix=True,
             validate_creation_date=True,
         )
 
@@ -71,7 +70,6 @@ class ProductDataValidator:
         target: ClientTarget,
         expected_flag: str,
         index_definitions: Iterable[tuple[str, str]],
-        allow_date_suffix: bool = False,
         validate_creation_date: bool = False,
     ) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, expected_flag)
@@ -80,23 +78,13 @@ class ProductDataValidator:
 
         for suffix, timestamp_field in index_definitions:
             index_name = f"{target.client_id}_{suffix}"
-            if allow_date_suffix:
-                self._validate_index_with_optional_date_suffix(
-                    index_name,
-                    timestamp_field,
-                    errors,
-                    details,
-                    validate_creation_date,
-                )
-            elif validate_creation_date:
-                self._validate_index_creation_date(index_name, errors, details)
-            else:
-                self._validate_index(
-                    index_name,
-                    timestamp_field,
-                    errors,
-                    details,
-                )
+            self._validate_index_with_optional_date_suffix(
+                index_name,
+                timestamp_field,
+                errors,
+                details,
+                validate_creation_date,
+            )
         return errors, details
 
     def _validate_index_with_optional_date_suffix(
@@ -109,7 +97,7 @@ class ProductDataValidator:
     ) -> None:
         """Valida o índice fixo ou sua versão diária com data no sufixo."""
         try:
-            resolved_index_name = self._repository.get_index_name_with_optional_date(
+            candidate_index_names = self._repository.get_index_names_with_optional_date(
                 index_name,
                 self._reference_date,
             )
@@ -120,22 +108,22 @@ class ProductDataValidator:
             )
             return
 
-        if resolved_index_name is None:
+        if not candidate_index_names:
             errors.append(
                 f"Índice '{index_name}' não encontrado, nem versão com data "
                 f"para {self._reference_date.isoformat()}."
             )
             return
 
-        if resolved_index_name != index_name:
-            details.append(
-                f"Índice '{index_name}' não existe sem data; usando índice diário "
-                f"'{resolved_index_name}'."
-            )
-        if validate_creation_date:
-            self._validate_index_creation_date(resolved_index_name, errors, details)
-        else:
-            self._validate_index(resolved_index_name, timestamp_field, errors, details)
+        details.append(
+            f"Índice '{index_name}' | candidatos selecionados: "
+            f"{', '.join(candidate_index_names)}."
+        )
+        for candidate_index_name in candidate_index_names:
+            if validate_creation_date:
+                self._validate_index_creation_date(candidate_index_name, errors, details)
+            else:
+                self._validate_index(candidate_index_name, timestamp_field, errors, details)
 
     def _validate_index_creation_date(
         self,
