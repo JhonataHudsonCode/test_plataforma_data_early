@@ -41,6 +41,7 @@ class ProductDataValidator:
             target,
             "has_wazuh",
             (("asset-compliance", "@timestamp"), ("asset-policy-compliance", "@timestamp")),
+            allow_date_suffix=True,
         )
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
@@ -69,6 +70,7 @@ class ProductDataValidator:
         target: ClientTarget,
         expected_flag: str,
         index_definitions: Iterable[tuple[str, str]],
+        allow_date_suffix: bool = False,
     ) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, expected_flag)
         if client is None:
@@ -76,13 +78,55 @@ class ProductDataValidator:
 
         for suffix, timestamp_field in index_definitions:
             index_name = f"{target.client_id}_{suffix}"
-            self._validate_index(
-                index_name,
-                timestamp_field,
-                errors,
-                details,
-            )
+            if allow_date_suffix:
+                self._validate_index_with_optional_date_suffix(
+                    index_name,
+                    timestamp_field,
+                    errors,
+                    details,
+                )
+            else:
+                self._validate_index(
+                    index_name,
+                    timestamp_field,
+                    errors,
+                    details,
+                )
         return errors, details
+
+    def _validate_index_with_optional_date_suffix(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida o índice fixo ou sua versão diária com data no sufixo."""
+        try:
+            resolved_index_name = self._repository.get_index_name_with_optional_date(
+                index_name,
+                self._reference_date,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao localizar candidatos: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        if resolved_index_name is None:
+            errors.append(
+                f"Índice '{index_name}' não encontrado, nem versão com data "
+                f"para {self._reference_date.isoformat()}."
+            )
+            return
+
+        if resolved_index_name != index_name:
+            details.append(
+                f"Índice '{index_name}' não existe sem data; usando índice diário "
+                f"'{resolved_index_name}'."
+            )
+        self._validate_index(resolved_index_name, timestamp_field, errors, details)
 
     def _validate_dated_asset_indices(
         self,
