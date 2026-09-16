@@ -320,10 +320,39 @@ class ProductDataValidator:
             )
             return
 
-        for field in fields:
-            field_name = f"{field_prefix}{field}"
-            current_value = latest_values.get(field)
-            previous_value = previous_values.get(field)
+        variation_fields = tuple(
+            (
+                f"{field_prefix}{field}",
+                latest_values.get(field),
+                previous_values.get(field),
+            )
+            for field in fields
+        )
+        self._validate_fifty_percent_variation(
+            index_name,
+            variation_fields,
+            errors,
+            details,
+        )
+
+        if "_asset_" in index_name:
+            self._validate_asset_events_equality(
+                index_name,
+                latest_values,
+                previous_values,
+                errors,
+                details,
+            )
+
+    def _validate_fifty_percent_variation(
+        self,
+        index_name: str,
+        fields: tuple[tuple[str, object, object], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Falha quando um indicador numérico cresce mais de 50% entre dois documentos."""
+        for field_name, current_value, previous_value in fields:
             if not self._is_number(current_value) or not self._is_number(previous_value):
                 errors.append(
                     f"Índice '{index_name}' | {field_name} deve ser numérico nos "
@@ -363,15 +392,6 @@ class ProductDataValidator:
                     "máximo permitido: 50%."
                 )
 
-        if "_asset_" in index_name:
-            self._validate_asset_events_equality(
-                index_name,
-                latest_values,
-                previous_values,
-                errors,
-                details,
-            )
-
     def _validate_asset_events_equality(
         self,
         index_name: str,
@@ -401,9 +421,9 @@ class ProductDataValidator:
 
         fields = (
             (
-                "asset_events.compliance.total_checks",
-                latest_compliance.get("total_checks"),
-                previous_compliance.get("total_checks"),
+                "asset_events.compliance.score",
+                latest_compliance.get("score"),
+                previous_compliance.get("score"),
             ),
             (
                 "asset_events.technology",
@@ -427,6 +447,19 @@ class ProductDataValidator:
                     f"Índice '{index_name}' | {field_name} igual nos índices de hoje e ontem: "
                     f"{current_value!r}."
                 )
+
+        self._validate_fifty_percent_variation(
+            index_name,
+            (
+                (
+                    "asset_events.compliance.score",
+                    latest_compliance.get("score"),
+                    previous_compliance.get("score"),
+                ),
+            ),
+            errors,
+            details,
+        )
 
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
