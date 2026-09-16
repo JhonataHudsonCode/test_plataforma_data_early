@@ -420,18 +420,57 @@ class ProductDataValidator:
                 f"e ontem: {latest_technology!r}."
             )
 
-        self._validate_fifty_percent_variation(
+        self._validate_score_maximum_decrease(
             index_name,
-            (
-                (
-                    "asset_events.compliance.score",
-                    latest_compliance.get("score"),
-                    previous_compliance.get("score"),
-                ),
-            ),
+            latest_compliance.get("score"),
+            previous_compliance.get("score"),
             errors,
             details,
         )
+
+    def _validate_score_maximum_decrease(
+        self,
+        index_name: str,
+        current_value: object,
+        previous_value: object,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Falha quando o score mais recente cai 50% ou mais em relação ao anterior."""
+        field_name = "asset_events.compliance.score"
+        if not self._is_number(current_value) or not self._is_number(previous_value):
+            errors.append(
+                f"Índice '{index_name}' | {field_name} deve ser numérico nos documentos "
+                "mais recente e do dia anterior."
+            )
+            return
+
+        current = float(current_value)
+        previous = float(previous_value)
+        if current < 0 or previous < 0:
+            errors.append(
+                f"Índice '{index_name}' | {field_name} não pode possuir valor negativo "
+                f"(anterior={previous_value}, mais recente={current_value})."
+            )
+            return
+        if previous == 0:
+            details.append(
+                f"Índice '{index_name}' | {field_name}: anterior=0, mais recente={current_value}; "
+                "não há redução percentual a validar."
+            )
+            return
+
+        variation = (current - previous) / previous
+        details.append(
+            f"Índice '{index_name}' | {field_name}: anterior={previous_value}, "
+            f"mais recente={current_value}, variação={variation:.0%}."
+        )
+        if variation <= -0.5:
+            errors.append(
+                f"Índice '{index_name}' | {field_name} reduziu {abs(variation):.0%} "
+                f"(anterior={previous_value}, mais recente={current_value}); "
+                "redução máxima permitida: menos de 50%."
+            )
 
     def _validate_fifty_percent_variation(
         self,
