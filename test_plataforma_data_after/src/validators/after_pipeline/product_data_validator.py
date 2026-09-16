@@ -26,7 +26,12 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
-        self._validate_dated_asset_indices(target.client_id, errors, details)
+        self._validate_dated_asset_indices(
+            target.client_id,
+            "@timestamp",
+            errors,
+            details,
+        )
         for suffix in ("asset-historical-observability", "asset-historical-software"):
             self._validate_index(f"{target.client_id}_{suffix}", "date", errors, details)
         return errors, details
@@ -82,10 +87,11 @@ class ProductDataValidator:
     def _validate_dated_asset_indices(
         self,
         client_id: str,
+        timestamp_field: str,
         errors: list[str],
         details: list[str],
     ) -> None:
-        index_prefix = f"{client_id}_asset_"
+        index_prefix = f"{client_id}_asset-"
         previous_date = self._reference_date - timedelta(days=1)
         try:
             index_names = self._repository.get_index_names_for_dates(
@@ -118,12 +124,14 @@ class ProductDataValidator:
         current_document = self._validate_dated_index_document(
             current_index_name,
             self._reference_date,
+            timestamp_field,
             errors,
             details,
         )
         previous_document = self._validate_dated_index_document(
             previous_index_name,
             previous_date,
+            timestamp_field,
             errors,
             details,
         )
@@ -140,6 +148,7 @@ class ProductDataValidator:
         self,
         index_name: str,
         expected_date: date,
+        timestamp_field: str,
         errors: list[str],
         details: list[str],
     ) -> dict[str, Any] | None:
@@ -154,7 +163,7 @@ class ProductDataValidator:
             if index.document_count <= 0:
                 errors.append(f"Índice '{index_name}' não possui documentos.")
                 return None
-            document = self._repository.get_latest_document(index_name, "date")
+            document = self._repository.get_latest_document(index_name, timestamp_field)
         except Exception as error:
             errors.append(
                 f"Índice '{index_name}' | erro ao consultar documento mais recente: "
@@ -166,17 +175,18 @@ class ProductDataValidator:
             errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
             return None
 
-        document_date = self._parse_date(self._source(document).get("date"))
+        timestamp = self._source(document).get(timestamp_field)
+        document_date = self._parse_date(timestamp)
         if document_date != expected_date:
             errors.append(
-                f"Índice '{index_name}' | documento mais recente com date "
-                f"{self._source(document).get('date', 'não informado')}; esperado "
+                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
+                f"{timestamp or 'não informado'}; esperado "
                 f"{expected_date.isoformat()}."
             )
             return None
         details.append(
             f"Índice '{index_name}' validado: {index.document_count} documento(s); "
-            f"date mais recente: {self._source(document).get('date')}."
+            f"{timestamp_field} mais recente: {timestamp}."
         )
         return document
 
@@ -307,6 +317,11 @@ class ProductDataValidator:
                 "assets_with_unauthorized_softwares",
             )
             field_prefix = ""
+        elif index_name.endswith("_asset-historical-observability"):
+            latest_values = self._source(latest_document).get("asset")
+            previous_values = self._source(previous_document).get("asset")
+            fields = ("monitored_vulns", "monitored_events")
+            field_prefix = "asset."
         else:
             latest_values = self._source(latest_document).get("asset")
             previous_values = self._source(previous_document).get("asset")
@@ -335,7 +350,9 @@ class ProductDataValidator:
             details,
         )
 
-        if "_asset_" in index_name:
+        if not index_name.endswith("_asset-historical-software") and not index_name.endswith(
+            "_asset-historical-observability"
+        ):
             self._validate_asset_events_equality(
                 index_name,
                 latest_values,
