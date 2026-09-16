@@ -337,22 +337,19 @@ class ProductDataValidator:
         else:
             latest_values = self._source(latest_document).get("asset")
             previous_values = self._source(previous_document).get("asset")
-            fields = ("monitored_vulns", "monitored_events")
-            field_prefix = "asset."
-            self._validate_fifty_percent_variation(
+            if not isinstance(latest_values, dict) or not isinstance(previous_values, dict):
+                errors.append(
+                    f"Índice '{index_name}' | campo asset ausente nos documentos "
+                    "mais recente ou do dia anterior."
+                )
+                return
+            self._validate_asset_events_equality(
                 index_name,
-                self._variation_fields(latest_values, previous_values, fields, field_prefix),
+                latest_values,
+                previous_values,
                 errors,
                 details,
             )
-            if isinstance(latest_values, dict) and isinstance(previous_values, dict):
-                self._validate_asset_events_equality(
-                    index_name,
-                    latest_values,
-                    previous_values,
-                    errors,
-                    details,
-                )
 
     @staticmethod
     def _variation_fields(
@@ -399,38 +396,39 @@ class ProductDataValidator:
             )
             return
 
-        fields = (
-            (
-                "asset_events.compliance.score",
-                latest_compliance.get("score"),
-                previous_compliance.get("score"),
-            ),
-            (
-                "asset_events.technology",
-                latest_events.get("technology", latest_compliance.get("technology")),
-                previous_events.get("technology", previous_compliance.get("technology")),
-            ),
+        latest_technology = latest_events.get(
+            "technology",
+            latest_compliance.get("technology"),
         )
-        for field_name, current_value, previous_value in fields:
-            if current_value is None or previous_value is None:
-                errors.append(
-                    f"Índice '{index_name}' | {field_name} ausente nos documentos "
-                    "mais recente ou do dia anterior."
-                )
-            elif current_value != previous_value:
-                errors.append(
-                    f"Índice '{index_name}' | {field_name} divergente entre os índices: "
-                    f"anterior={previous_value!r}, mais recente={current_value!r}."
-                )
-            else:
-                details.append(
-                    f"Índice '{index_name}' | {field_name} igual nos índices de hoje e ontem: "
-                    f"{current_value!r}."
-                )
+        previous_technology = previous_events.get(
+            "technology",
+            previous_compliance.get("technology"),
+        )
+        if latest_technology is None or previous_technology is None:
+            errors.append(
+                f"Índice '{index_name}' | asset_events.technology ausente nos documentos "
+                "mais recente ou do dia anterior."
+            )
+        elif latest_technology != previous_technology:
+            errors.append(
+                f"Índice '{index_name}' | asset_events.technology divergente entre os índices: "
+                f"anterior={previous_technology!r}, mais recente={latest_technology!r}."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' | asset_events.technology igual nos índices de hoje "
+                f"e ontem: {latest_technology!r}."
+            )
 
         self._validate_fifty_percent_variation(
             index_name,
-            (("asset_events.compliance.score", latest_compliance.get("score"), previous_compliance.get("score")),),
+            (
+                (
+                    "asset_events.compliance.score",
+                    latest_compliance.get("score"),
+                    previous_compliance.get("score"),
+                ),
+            ),
             errors,
             details,
         )
@@ -482,75 +480,6 @@ class ProductDataValidator:
                     f"(anterior={previous_value}, mais recente={current_value}); "
                     "máximo permitido: 50%."
                 )
-
-    def _validate_asset_events_equality(
-        self,
-        index_name: str,
-        latest_asset: dict[str, Any],
-        previous_asset: dict[str, Any],
-        errors: list[str],
-        details: list[str],
-    ) -> None:
-        """Valida campos estáveis de asset_events entre os índices diários de ativos."""
-        latest_events = latest_asset.get("asset_events", latest_asset.get("assets_events"))
-        previous_events = previous_asset.get("asset_events", previous_asset.get("assets_events"))
-        if not isinstance(latest_events, dict) or not isinstance(previous_events, dict):
-            errors.append(
-                f"Índice '{index_name}' | asset_events ausente nos documentos "
-                "mais recente ou do dia anterior."
-            )
-            return
-
-        latest_compliance = latest_events.get("compliance")
-        previous_compliance = previous_events.get("compliance")
-        if not isinstance(latest_compliance, dict) or not isinstance(previous_compliance, dict):
-            errors.append(
-                f"Índice '{index_name}' | asset_events.compliance ausente nos documentos "
-                "mais recente ou do dia anterior."
-            )
-            return
-
-        fields = (
-            (
-                "asset_events.compliance.score",
-                latest_compliance.get("score"),
-                previous_compliance.get("score"),
-            ),
-            (
-                "asset_events.technology",
-                latest_events.get("technology", latest_compliance.get("technology")),
-                previous_events.get("technology", previous_compliance.get("technology")),
-            ),
-        )
-        for field_name, current_value, previous_value in fields:
-            if current_value is None or previous_value is None:
-                errors.append(
-                    f"Índice '{index_name}' | {field_name} ausente nos documentos "
-                    "mais recente ou do dia anterior."
-                )
-            elif current_value != previous_value:
-                errors.append(
-                    f"Índice '{index_name}' | {field_name} divergente entre os índices: "
-                    f"anterior={previous_value!r}, mais recente={current_value!r}."
-                )
-            else:
-                details.append(
-                    f"Índice '{index_name}' | {field_name} igual nos índices de hoje e ontem: "
-                    f"{current_value!r}."
-                )
-
-        self._validate_fifty_percent_variation(
-            index_name,
-            (
-                (
-                    "asset_events.compliance.score",
-                    latest_compliance.get("score"),
-                    previous_compliance.get("score"),
-                ),
-            ),
-            errors,
-            details,
-        )
 
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
