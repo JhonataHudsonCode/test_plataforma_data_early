@@ -42,6 +42,7 @@ class ProductDataValidator:
             "has_wazuh",
             (("asset-compliance", "@timestamp"), ("asset-policy-compliance", "@timestamp")),
             allow_date_suffix=True,
+            validate_creation_date=True,
         )
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
@@ -71,6 +72,7 @@ class ProductDataValidator:
         expected_flag: str,
         index_definitions: Iterable[tuple[str, str]],
         allow_date_suffix: bool = False,
+        validate_creation_date: bool = False,
     ) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, expected_flag)
         if client is None:
@@ -84,7 +86,10 @@ class ProductDataValidator:
                     timestamp_field,
                     errors,
                     details,
+                    validate_creation_date,
                 )
+            elif validate_creation_date:
+                self._validate_index_creation_date(index_name, errors, details)
             else:
                 self._validate_index(
                     index_name,
@@ -100,6 +105,7 @@ class ProductDataValidator:
         timestamp_field: str,
         errors: list[str],
         details: list[str],
+        validate_creation_date: bool = False,
     ) -> None:
         """Valida o índice fixo ou sua versão diária com data no sufixo."""
         try:
@@ -126,7 +132,50 @@ class ProductDataValidator:
                 f"Índice '{index_name}' não existe sem data; usando índice diário "
                 f"'{resolved_index_name}'."
             )
-        self._validate_index(resolved_index_name, timestamp_field, errors, details)
+        if validate_creation_date:
+            self._validate_index_creation_date(resolved_index_name, errors, details)
+        else:
+            self._validate_index(resolved_index_name, timestamp_field, errors, details)
+
+    def _validate_index_creation_date(
+        self,
+        index_name: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida existência, documentos e a data de criação do índice."""
+        try:
+            index = next(
+                (item for item in self._repository.get_indices(index_name) if item.name == index_name),
+                None,
+            )
+            if index is None:
+                errors.append(f"Índice '{index_name}' não encontrado.")
+                return
+            if index.document_count <= 0:
+                errors.append(f"Índice '{index_name}' não possui documentos.")
+                return
+            metadata = self._repository.get_index_metadata(index_name)
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar data de criação: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        creation_date = metadata.created_at.date()
+        if creation_date != self._reference_date:
+            errors.append(
+                f"Índice '{index_name}' | criado em {metadata.created_at.isoformat()}; "
+                f"último dia encontrado: {creation_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+            return
+
+        details.append(
+            f"Índice '{index_name}' validado: {index.document_count} documento(s); "
+            f"criado em {metadata.created_at.isoformat()}."
+        )
 
     def _validate_dated_asset_indices(
         self,
