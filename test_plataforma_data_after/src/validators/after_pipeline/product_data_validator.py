@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
 from src.config.settings import ClientTarget
+from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 
@@ -97,7 +98,7 @@ class ProductDataValidator:
     ) -> None:
         """Valida o índice fixo ou sua versão diária com data no sufixo."""
         try:
-            candidate_index_names = self._repository.get_index_names_with_optional_date(
+            candidate_indices = self._repository.get_indices_with_optional_date(
                 index_name,
                 self._reference_date,
             )
@@ -108,7 +109,7 @@ class ProductDataValidator:
             )
             return
 
-        if not candidate_index_names:
+        if not candidate_indices:
             errors.append(
                 f"Índice '{index_name}' não encontrado, nem versão com data "
                 f"para {self._reference_date.isoformat()}."
@@ -117,36 +118,26 @@ class ProductDataValidator:
 
         details.append(
             f"Índice '{index_name}' | candidatos selecionados: "
-            f"{', '.join(candidate_index_names)}."
+            f"{', '.join(candidate.name for candidate in candidate_indices)}."
         )
-        for candidate_index_name in candidate_index_names:
+        for candidate_index in candidate_indices:
             if validate_creation_date:
-                self._validate_index_creation_date(candidate_index_name, errors, details)
+                self._validate_index_creation_date(candidate_index, errors, details)
             else:
-                self._validate_index(candidate_index_name, timestamp_field, errors, details)
+                self._validate_index(candidate_index.name, timestamp_field, errors, details)
 
     def _validate_index_creation_date(
         self,
-        index_name: str,
+        index: VulnerabilityIndex,
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Valida existência, documentos e a data de criação do índice."""
+        """Valida somente a data de criação do índice já encontrado."""
         try:
-            index = next(
-                (item for item in self._repository.get_indices(index_name) if item.name == index_name),
-                None,
-            )
-            if index is None:
-                errors.append(f"Índice '{index_name}' não encontrado.")
-                return
-            if index.document_count <= 0:
-                errors.append(f"Índice '{index_name}' não possui documentos.")
-                return
-            metadata = self._repository.get_index_metadata(index_name)
+            metadata = self._repository.get_index_metadata(index.name)
         except Exception as error:
             errors.append(
-                f"Índice '{index_name}' | erro ao consultar data de criação: "
+                f"Índice '{index.name}' | erro ao consultar data de criação: "
                 f"{error.__class__.__name__}: {error}"
             )
             return
@@ -154,15 +145,15 @@ class ProductDataValidator:
         creation_date = metadata.created_at.date()
         if creation_date != self._reference_date:
             errors.append(
-                f"Índice '{index_name}' | criado em {metadata.created_at.isoformat()}; "
+                f"Índice '{index.name}' | criado em {metadata.created_at.isoformat()}; "
                 f"último dia encontrado: {creation_date.isoformat()}; "
                 f"esperado {self._reference_date.isoformat()}."
             )
             return
 
         details.append(
-            f"Índice '{index_name}' validado: {index.document_count} documento(s); "
-            f"criado em {metadata.created_at.isoformat()}."
+            f"Índice '{index.name}' | creation_date validado: "
+            f"{metadata.created_at.isoformat()}."
         )
 
     def _validate_dated_asset_indices(
