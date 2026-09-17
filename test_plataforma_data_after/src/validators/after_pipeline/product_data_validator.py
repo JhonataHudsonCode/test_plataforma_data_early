@@ -49,7 +49,8 @@ class ProductDataValidator:
         return self._validate_module_indices(
             target,
             "has_asset",
-            (("authorized-software", "@timestamp"), ("mandatory-software", "@timestamp")),
+            (("authorized-software", "lastupdated"), ("mandatory-software", "lastupdated")),
+            compare_previous_day=False,
         )
 
     def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
@@ -72,6 +73,7 @@ class ProductDataValidator:
         expected_flag: str,
         index_definitions: Iterable[tuple[str, str]],
         validate_creation_date: bool = False,
+        compare_previous_day: bool = True,
     ) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, expected_flag)
         if client is None:
@@ -85,6 +87,7 @@ class ProductDataValidator:
                 errors,
                 details,
                 validate_creation_date,
+                compare_previous_day,
             )
         return errors, details
 
@@ -95,6 +98,7 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
         validate_creation_date: bool = False,
+        compare_previous_day: bool = True,
     ) -> None:
         """Valida o índice fixo ou sua versão diária com data no sufixo."""
         try:
@@ -124,7 +128,13 @@ class ProductDataValidator:
             if validate_creation_date:
                 self._validate_index_creation_date(candidate_index, errors, details)
             else:
-                self._validate_index(candidate_index.name, timestamp_field, errors, details)
+                self._validate_index(
+                    candidate_index.name,
+                    timestamp_field,
+                    errors,
+                    details,
+                    compare_previous_day,
+                )
 
     def _validate_index_creation_date(
         self,
@@ -295,6 +305,7 @@ class ProductDataValidator:
         timestamp_field: str,
         errors: list[str],
         details: list[str],
+        compare_previous_day: bool = True,
     ) -> None:
         try:
             index = next(
@@ -325,6 +336,19 @@ class ProductDataValidator:
         if document_date is None:
             errors.append(
                 f"Índice '{index_name}' | documento mais recente sem {timestamp_field} válido."
+            )
+            return
+        if document_date != self._reference_date:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
+                f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+            return
+        if not compare_previous_day:
+            details.append(
+                f"Índice '{index_name}' possui {index.document_count} documento(s); "
+                f"lastupdated mais recente é de hoje: {timestamp}."
             )
             return
         try:
@@ -358,14 +382,6 @@ class ProductDataValidator:
                 errors,
                 details,
             )
-        if document_date != self._reference_date:
-            errors.append(
-                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
-                f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
-                f"esperado {self._reference_date.isoformat()}."
-            )
-            return
-
         details.append(
             f"Índice '{index_name}' possui {index.document_count} documento(s); "
             "documento mais recente é de hoje."
