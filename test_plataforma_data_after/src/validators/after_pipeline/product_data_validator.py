@@ -325,75 +325,45 @@ class ProductDataValidator:
         details: list[str],
         compare_previous_day: bool = True,
     ) -> _IndexDocuments | None:
-        """Valida atualização e retorna documentos já carregados, sem regras de ativos."""
+        """Orquestra a validação genérica de atualização de um índice."""
         index_name = (
             index_or_name.name
             if isinstance(index_or_name, VulnerabilityIndex)
             else index_or_name
         )
-        try:
-            index = (
-                index_or_name
-                if isinstance(index_or_name, VulnerabilityIndex)
-                else next(
-                    (
-                        item
-                        for item in self._repository.get_indices(index_name)
-                        if item.name == index_name
-                    ),
-                    None,
-                )
-            )
-            if index is None:
-                errors.append(f"Índice '{index_name}' não encontrado.")
-                return None
-            if index.document_count <= 0:
-                errors.append(f"Índice '{index_name}' não possui documentos.")
-                return None
-
-            document = self._repository.get_latest_document(index_name, timestamp_field)
-        except Exception as error:
-            errors.append(
-                f"Índice '{index_name}' | erro ao consultar documento mais recente: "
-                f"{error.__class__.__name__}: {error}"
-            )
+        index = self._get_available_index(index_or_name, errors)
+        if index is None:
             return None
 
+        document = self._get_latest_document(index.name, timestamp_field, errors)
         if document is None:
-            errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
             return None
 
-        timestamp = self._source(document).get(timestamp_field)
-        document_date = self._parse_date(timestamp)
-        if document_date is None:
-            errors.append(
-                f"Índice '{index_name}' | documento mais recente sem {timestamp_field} válido."
-            )
+        timestamp_and_date = self._validate_latest_document_date(
+            index.name,
+            document,
+            timestamp_field,
+            errors,
+        )
+        if timestamp_and_date is None:
             return None
-        if document_date != self._reference_date:
-            errors.append(
-                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
-                f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
-                f"esperado {self._reference_date.isoformat()}."
-            )
-            return None
+        timestamp, document_date = timestamp_and_date
+
         if not compare_previous_day:
             details.append(
                 f"Índice '{index_name}' possui {index.document_count} documento(s); "
                 f"lastupdated mais recente é de hoje: {timestamp}."
             )
             return _IndexDocuments(latest=document, previous=None)
-        try:
-            previous_day_documents = self._repository.get_previous_day_documents(
-                index_name,
-                timestamp,
-                timestamp_field,
-            )
-        except Exception as error:
-            errors.append(
-                f"Índice '{index_name}' | erro ao consultar documentos do dia anterior "
-                f"a {document_date.isoformat()}: {error.__class__.__name__}: {error}"
-            )
+
+        previous_day_documents = self._get_previous_day_documents(
+            index_name,
+            timestamp,
+            timestamp_field,
+            document_date,
+            errors,
+        )
+        if previous_day_documents is None:
             return None
 
         previous_day = document_date - timedelta(days=1)
@@ -414,6 +384,104 @@ class ProductDataValidator:
             "documento mais recente é de hoje."
         )
         return _IndexDocuments(latest=document, previous=previous_document)
+
+    def _get_available_index(
+        self,
+        index_or_name: VulnerabilityIndex | str,
+        errors: list[str],
+    ) -> VulnerabilityIndex | None:
+        """Obtém o índice já candidato ou o localiza pelo nome."""
+        if isinstance(index_or_name, VulnerabilityIndex):
+            index = index_or_name
+        else:
+            try:
+                index = next(
+                    (
+                        item
+                        for item in self._repository.get_indices(index_or_name)
+                        if item.name == index_or_name
+                    ),
+                    None,
+                )
+            except Exception as error:
+                errors.append(
+                    f"Índice '{index_or_name}' | erro ao consultar índice: "
+                    f"{error.__class__.__name__}: {error}"
+                )
+                return None
+
+        if index is None:
+            errors.append(f"Índice '{index_or_name}' não encontrado.")
+            return None
+        if index.document_count <= 0:
+            errors.append(f"Índice '{index.name}' não possui documentos.")
+            return None
+        return index
+
+    def _get_latest_document(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        errors: list[str],
+    ) -> dict[str, Any] | None:
+        """Consulta o documento mais recente uma única vez."""
+        try:
+            document = self._repository.get_latest_document(index_name, timestamp_field)
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documento mais recente: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return None
+        if document is None:
+            errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
+        return document
+
+    def _validate_latest_document_date(
+        self,
+        index_name: str,
+        document: dict[str, Any],
+        timestamp_field: str,
+        errors: list[str],
+    ) -> tuple[str, date] | None:
+        """Garante que o campo temporal do documento mais recente seja de hoje."""
+        timestamp = self._source(document).get(timestamp_field)
+        document_date = self._parse_date(timestamp)
+        if document_date is None:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente sem {timestamp_field} válido."
+            )
+            return None
+        if document_date != self._reference_date:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
+                f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+            return None
+        return timestamp, document_date
+
+    def _get_previous_day_documents(
+        self,
+        index_name: str,
+        timestamp: str,
+        timestamp_field: str,
+        document_date: date,
+        errors: list[str],
+    ) -> list[dict[str, Any]] | None:
+        """Consulta os documentos do dia anterior quando a regra exigir histórico."""
+        try:
+            return self._repository.get_previous_day_documents(
+                index_name,
+                timestamp,
+                timestamp_field,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos do dia anterior "
+                f"a {document_date.isoformat()}: {error.__class__.__name__}: {error}"
+            )
+            return None
 
     def _validate_assets_variation(
         self,
