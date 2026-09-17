@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
@@ -7,6 +8,14 @@ from src.config.settings import ClientTarget
 from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
+
+
+@dataclass(frozen=True, slots=True)
+class _IndexDocuments:
+    """Documentos já consultados durante a validação de um índice."""
+
+    latest: dict[str, Any]
+    previous: dict[str, Any] | None
 
 
 class ProductDataValidator:
@@ -34,7 +43,16 @@ class ProductDataValidator:
             details,
         )
         for suffix in ("asset-historical-observability", "asset-historical-software"):
-            self._validate_index(f"{target.client_id}_{suffix}", "date", errors, details)
+            index_name = f"{target.client_id}_{suffix}"
+            documents = self._validate_index(index_name, "date", errors, details)
+            if documents is not None and documents.previous is not None:
+                self._validate_assets_variation(
+                    index_name,
+                    documents.latest,
+                    documents.previous,
+                    errors,
+                    details,
+                )
         return errors, details
 
     def validate_compliance(self, target: ClientTarget) -> tuple[list[str], list[str]]:
@@ -129,7 +147,7 @@ class ProductDataValidator:
                 self._validate_index_creation_date(candidate_index, errors, details)
             else:
                 self._validate_index(
-                    candidate_index.name,
+                    candidate_index,
                     timestamp_field,
                     errors,
                     details,
@@ -301,23 +319,37 @@ class ProductDataValidator:
 
     def _validate_index(
         self,
-        index_name: str,
+        index_or_name: VulnerabilityIndex | str,
         timestamp_field: str,
         errors: list[str],
         details: list[str],
         compare_previous_day: bool = True,
-    ) -> None:
+    ) -> _IndexDocuments | None:
+        """Valida atualização e retorna documentos já carregados, sem regras de ativos."""
+        index_name = (
+            index_or_name.name
+            if isinstance(index_or_name, VulnerabilityIndex)
+            else index_or_name
+        )
         try:
-            index = next(
-                (item for item in self._repository.get_indices(index_name) if item.name == index_name),
-                None,
+            index = (
+                index_or_name
+                if isinstance(index_or_name, VulnerabilityIndex)
+                else next(
+                    (
+                        item
+                        for item in self._repository.get_indices(index_name)
+                        if item.name == index_name
+                    ),
+                    None,
+                )
             )
             if index is None:
                 errors.append(f"Índice '{index_name}' não encontrado.")
-                return
+                return None
             if index.document_count <= 0:
                 errors.append(f"Índice '{index_name}' não possui documentos.")
-                return
+                return None
 
             document = self._repository.get_latest_document(index_name, timestamp_field)
         except Exception as error:
@@ -325,11 +357,11 @@ class ProductDataValidator:
                 f"Índice '{index_name}' | erro ao consultar documento mais recente: "
                 f"{error.__class__.__name__}: {error}"
             )
-            return
+            return None
 
         if document is None:
             errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
-            return
+            return None
 
         timestamp = self._source(document).get(timestamp_field)
         document_date = self._parse_date(timestamp)
@@ -337,20 +369,20 @@ class ProductDataValidator:
             errors.append(
                 f"Índice '{index_name}' | documento mais recente sem {timestamp_field} válido."
             )
-            return
+            return None
         if document_date != self._reference_date:
             errors.append(
                 f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
                 f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
                 f"esperado {self._reference_date.isoformat()}."
             )
-            return
+            return None
         if not compare_previous_day:
             details.append(
                 f"Índice '{index_name}' possui {index.document_count} documento(s); "
                 f"lastupdated mais recente é de hoje: {timestamp}."
             )
-            return
+            return _IndexDocuments(latest=document, previous=None)
         try:
             previous_day_documents = self._repository.get_previous_day_documents(
                 index_name,
@@ -362,7 +394,7 @@ class ProductDataValidator:
                 f"Índice '{index_name}' | erro ao consultar documentos do dia anterior "
                 f"a {document_date.isoformat()}: {error.__class__.__name__}: {error}"
             )
-            return
+            return None
 
         previous_day = document_date - timedelta(days=1)
         details.append(
@@ -374,18 +406,14 @@ class ProductDataValidator:
                 f"Índice '{index_name}' não possui documentos no dia anterior "
                 f"ao mais recente ({previous_day.isoformat()})."
             )
+            previous_document = None
         else:
-            self._validate_assets_variation(
-                index_name,
-                document,
-                previous_day_documents[0],
-                errors,
-                details,
-            )
+            previous_document = previous_day_documents[0]
         details.append(
             f"Índice '{index_name}' possui {index.document_count} documento(s); "
             "documento mais recente é de hoje."
         )
+        return _IndexDocuments(latest=document, previous=previous_document)
 
     def _validate_assets_variation(
         self,
