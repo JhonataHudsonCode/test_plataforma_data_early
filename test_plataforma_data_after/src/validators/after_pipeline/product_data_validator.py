@@ -269,8 +269,15 @@ class ProductDataValidator:
         details: list[str],
     ) -> None:
         """Valida recursivamente os atributos de score do OTO Dashboard."""
-        latest_scores = self._collect_oto_score_attributes(self._source(latest_document))
-        previous_scores = self._collect_oto_score_attributes(self._source(previous_document))
+        reference_month = self._reference_date.strftime("%Y-%m")
+        latest_scores = self._collect_oto_score_attributes(
+            self._source(latest_document),
+            reference_month=reference_month,
+        )
+        previous_scores = self._collect_oto_score_attributes(
+            self._source(previous_document),
+            reference_month=reference_month,
+        )
         if not latest_scores:
             errors.append(
                 f"Índice '{index_name}' | nenhum atributo de score foi encontrado "
@@ -325,6 +332,7 @@ class ProductDataValidator:
         value: object,
         path: str = "",
         score_container: bool = False,
+        reference_month: str | None = None,
     ) -> dict[str, object]:
         """Retorna folhas de score, preservando o caminho para leitura no report."""
         attributes: dict[str, object] = {}
@@ -341,18 +349,31 @@ class ProductDataValidator:
                             nested_value,
                             attribute_path,
                             nested_score_container,
+                            reference_month,
                         )
                     )
                 elif key_has_score or score_container:
                     attributes[attribute_path] = nested_value
         elif isinstance(value, list):
             for position, nested_value in enumerate(value):
-                attribute_path = f"{path}[{position}]"
+                if path == "score_data.historical":
+                    if not isinstance(nested_value, dict):
+                        continue
+                    historical_date = nested_value.get("date")
+                    if not isinstance(historical_date, str) or (
+                        reference_month is not None
+                        and not historical_date.startswith(reference_month)
+                    ):
+                        continue
+                    attribute_path = f"{path}[date={historical_date}]"
+                else:
+                    attribute_path = f"{path}[{position}]"
                 attributes.update(
                     cls._collect_oto_score_attributes(
                         nested_value,
                         attribute_path,
                         score_container,
+                        reference_month,
                     )
                 )
         return attributes
