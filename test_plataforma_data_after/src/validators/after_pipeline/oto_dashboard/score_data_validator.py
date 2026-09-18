@@ -18,6 +18,33 @@ class OtoScoreDataValidator:
     ) -> None:
         self._variation_controller = variation_controller or OtoScoreVariationController()
 
+    @staticmethod
+    def handles(attribute_path: str) -> bool:
+        """Informa se o atributo possui uma regra própria de `score_data`."""
+        return attribute_path.startswith("score_data.historical[") and attribute_path.endswith(
+            "].score"
+        )
+
+    def validate_attribute(
+        self,
+        index_name: str,
+        attribute_path: str,
+        latest_value: float,
+        previous_value: float,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Direciona atributos de `score_data` para sua regra interna apropriada."""
+        if self.handles(attribute_path):
+            self.validate_historical_score(
+                index_name,
+                attribute_path,
+                latest_value,
+                previous_value,
+                errors,
+                details,
+            )
+
     def validate_historical_score(
         self,
         index_name: str,
