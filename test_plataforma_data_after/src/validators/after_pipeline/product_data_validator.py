@@ -95,11 +95,16 @@ class ProductDataValidator:
         return errors, details
 
     def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(
+        client, errors, details = self._get_applicable_client(
             target,
-            "is_saas",
-            (("oto_dashboard", "@timestamp"),),
+            "client_type",
+            "saas",
         )
+        if client is None:
+            return errors, details
+
+        self._validate_dated_oto_dashboard_indices(target.client_id, errors, details)
+        return errors, details
 
     def _validate_score_history(
         self,
@@ -194,6 +199,88 @@ class ProductDataValidator:
             details,
         )
 
+    def _validate_dated_oto_dashboard_indices(
+        self,
+        client_id: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara os documentos mais recentes dos índices diários do OTO Dashboard."""
+        index_prefix = f"{client_id}_oto_dashboard"
+        previous_date = self._reference_date - timedelta(days=1)
+        try:
+            index_names = self._repository.get_index_names_for_dates(
+                index_prefix,
+                (self._reference_date, previous_date),
+            )
+        except Exception as error:
+            errors.append(
+                f"Índices OTO Dashboard com prefixo '{index_prefix}' | erro ao localizar "
+                f"datas: {error.__class__.__name__}: {error}"
+            )
+            return
+
+        current_index_name = index_names.get(self._reference_date)
+        previous_index_name = index_names.get(previous_date)
+        if current_index_name is None:
+            errors.append(
+                f"Índice OTO Dashboard não encontrado para {self._reference_date.isoformat()}."
+            )
+        if previous_index_name is None:
+            errors.append(
+                f"Índice OTO Dashboard não encontrado para {previous_date.isoformat()}."
+            )
+        if current_index_name is None or previous_index_name is None:
+            return
+
+        current_document = self._validate_dated_index_document(
+            current_index_name,
+            self._reference_date,
+            "@timestamp",
+            errors,
+            details,
+        )
+        previous_document = self._validate_dated_index_document(
+            previous_index_name,
+            previous_date,
+            "@timestamp",
+            errors,
+            details,
+        )
+        if current_document is not None and previous_document is not None:
+            self._validate_oto_dashboard_metrics(
+                current_index_name,
+                current_document,
+                previous_document,
+                errors,
+                details,
+            )
+
+    def _validate_oto_dashboard_metrics(
+        self,
+        index_name: str,
+        latest_document: dict[str, Any],
+        previous_document: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida variação máxima de 50% nas métricas numéricas comuns ao OTO."""
+        latest_source = self._source(latest_document)
+        previous_source = self._source(previous_document)
+        fields = tuple(
+            (field_name, latest_source[field_name], previous_source[field_name])
+            for field_name in latest_source.keys() & previous_source.keys()
+            if self._is_number(latest_source[field_name])
+            and self._is_number(previous_source[field_name])
+        )
+        if not fields:
+            errors.append(
+                f"Índice '{index_name}' | não foram encontradas métricas numéricas "
+                "comuns para comparar entre hoje e ontem."
+            )
+            return
+        self._validate_fifty_percent_variation(index_name, fields, errors, details)
+
     def _validate_score_history_fields(
         self,
         index_name: str,
@@ -267,8 +354,13 @@ class ProductDataValidator:
         index_definitions: Iterable[tuple[str, str]],
         validate_creation_date: bool = False,
         compare_previous_day: bool = True,
+        expected_value: object = True,
     ) -> tuple[list[str], list[str]]:
-        client, errors, details = self._get_applicable_client(target, expected_flag)
+        client, errors, details = self._get_applicable_client(
+            target,
+            expected_flag,
+            expected_value,
+        )
         if client is None:
             return errors, details
 
@@ -468,7 +560,8 @@ class ProductDataValidator:
     def _get_applicable_client(
         self,
         target: ClientTarget,
-        expected_flag: str,
+        expected_field: str,
+        expected_value: object = True,
     ) -> tuple[dict[str, Any] | None, list[str], list[str]]:
         try:
             client = self._cognito_repository.get_client("public", target.client_id)
@@ -483,13 +576,15 @@ class ProductDataValidator:
                 f"Cliente '{target.client_id}' não encontrado no Cognito; "
                 "índices não aplicáveis."
             ]
-        if not bool(client.get(expected_flag)):
+        actual_value = client.get(expected_field)
+        if actual_value != expected_value:
             return None, [], [
-                f"Cliente '{target.client_id}' possui {expected_flag} desabilitado no Cognito; "
-                "índices não aplicáveis."
+                f"Cliente '{target.client_id}' | {expected_field}={actual_value!r}; "
+                f"esperado {expected_value!r}; índices não aplicáveis."
             ]
         return client, [], [
-            f"Cliente '{target.client_id}' | Cognito validado: {expected_flag} habilitado."
+            f"Cliente '{target.client_id}' | Cognito validado: "
+            f"{expected_field}={expected_value!r}."
         ]
 
     def _validate_index(
