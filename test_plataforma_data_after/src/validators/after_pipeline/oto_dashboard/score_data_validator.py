@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 from src.validators.after_pipeline.controllers.oto_score_variation_controller import (
     OtoScoreVariationController,
@@ -20,6 +20,12 @@ class OtoScoreDataValidator:
     ) -> None:
         self._reference_month = reference_month
         self._variation_controller = variation_controller or OtoScoreVariationController()
+        self._object_validators: dict[
+            str,
+            Callable[[str, object, object, list[str], list[str]], None],
+        ] = {
+            "historical": self._validate_historical,
+        }
 
     def validate(
         self,
@@ -43,13 +49,14 @@ class OtoScoreDataValidator:
             )
             return
 
-        self._validate_historical(
-            index_name,
-            latest_score_data.get("historical"),
-            previous_score_data.get("historical"),
-            errors,
-            details,
-        )
+        for object_name, object_validator in self._object_validators.items():
+            object_validator(
+                index_name,
+                latest_score_data.get(object_name),
+                previous_score_data.get(object_name),
+                errors,
+                details,
+            )
 
     def _validate_historical(
         self,
