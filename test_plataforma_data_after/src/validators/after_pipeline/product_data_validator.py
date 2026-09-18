@@ -33,6 +33,7 @@ class ProductDataValidator:
         ("cls_alta", None),
         ("cls_media", None),
     )
+    _OTO_NON_NUMERIC_SCORE_KEYS = frozenset({"domain_score"})
 
     def __init__(
         self,
@@ -267,22 +268,131 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Valida variação máxima de 50% nas métricas numéricas comuns ao OTO."""
-        latest_source = self._source(latest_document)
-        previous_source = self._source(previous_document)
-        fields = tuple(
-            (field_name, latest_source[field_name], previous_source[field_name])
-            for field_name in latest_source.keys() & previous_source.keys()
-            if self._is_number(latest_source[field_name])
-            and self._is_number(previous_source[field_name])
-        )
-        if not fields:
+        """Valida recursivamente os atributos de score do OTO Dashboard."""
+        latest_scores = self._collect_oto_score_attributes(self._source(latest_document))
+        previous_scores = self._collect_oto_score_attributes(self._source(previous_document))
+        if not latest_scores:
             errors.append(
-                f"Índice '{index_name}' | não foram encontradas métricas numéricas "
-                "comuns para comparar entre hoje e ontem."
+                f"Índice '{index_name}' | nenhum atributo de score foi encontrado "
+                "no documento mais recente."
             )
             return
-        self._validate_fifty_percent_variation(index_name, fields, errors, details)
+
+        for attribute_path, latest_value in latest_scores.items():
+            section = attribute_path.split(".", 1)[0].split("[", 1)[0]
+            previous_value = previous_scores.get(attribute_path)
+            if not self._is_float_score(latest_value):
+                errors.append(
+                    f"Índice '{index_name}' | seção **{section}** | atributo "
+                    f"**{attribute_path}** deve ser float no documento mais recente; "
+                    f"recebido {latest_value!r}."
+                )
+                continue
+            if attribute_path not in previous_scores:
+                errors.append(
+                    f"Índice '{index_name}' | seção **{section}** | atributo "
+                    f"**{attribute_path}** ausente no documento do dia anterior."
+                )
+                continue
+            if not self._is_float_score(previous_value):
+                errors.append(
+                    f"Índice '{index_name}' | seção **{section}** | atributo "
+                    f"**{attribute_path}** deve ser float no documento do dia anterior; "
+                    f"recebido {previous_value!r}."
+                )
+                continue
+
+            self._validate_oto_score_variation(
+                index_name,
+                section,
+                attribute_path,
+                latest_value,
+                previous_value,
+                errors,
+                details,
+            )
+
+        for attribute_path in previous_scores.keys() - latest_scores.keys():
+            section = attribute_path.split(".", 1)[0].split("[", 1)[0]
+            errors.append(
+                f"Índice '{index_name}' | seção **{section}** | atributo "
+                f"**{attribute_path}** ausente no documento mais recente."
+            )
+
+    @classmethod
+    def _collect_oto_score_attributes(
+        cls,
+        value: object,
+        path: str = "",
+        score_container: bool = False,
+    ) -> dict[str, object]:
+        """Retorna folhas de score, preservando o caminho para leitura no report."""
+        attributes: dict[str, object] = {}
+        if isinstance(value, dict):
+            for key, nested_value in value.items():
+                attribute_path = f"{path}.{key}" if path else key
+                key_has_score = "score" in key.casefold()
+                nested_score_container = key_has_score and key.casefold() != "score_data"
+                if key.casefold() in cls._OTO_NON_NUMERIC_SCORE_KEYS:
+                    continue
+                if isinstance(nested_value, (dict, list)):
+                    attributes.update(
+                        cls._collect_oto_score_attributes(
+                            nested_value,
+                            attribute_path,
+                            nested_score_container,
+                        )
+                    )
+                elif key_has_score or score_container:
+                    attributes[attribute_path] = nested_value
+        elif isinstance(value, list):
+            for position, nested_value in enumerate(value):
+                attribute_path = f"{path}[{position}]"
+                attributes.update(
+                    cls._collect_oto_score_attributes(
+                        nested_value,
+                        attribute_path,
+                        score_container,
+                    )
+                )
+        return attributes
+
+    def _validate_oto_score_variation(
+        self,
+        index_name: str,
+        section: str,
+        attribute_path: str,
+        latest_value: float,
+        previous_value: float,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida uma diferença absoluta máxima de 50% entre scores consecutivos."""
+        if previous_value == 0.0:
+            if latest_value == 0.0:
+                details.append(
+                    f"Índice '{index_name}' | seção **{section}** | atributo "
+                    f"**{attribute_path}**: sem variação (0.0 para 0.0)."
+                )
+            else:
+                errors.append(
+                    f"Índice '{index_name}' | seção **{section}** | atributo "
+                    f"**{attribute_path}** mudou de 0.0 para {latest_value}; "
+                    "não atende ao limite de 50%."
+                )
+            return
+
+        variation = abs(latest_value - previous_value) / abs(previous_value)
+        message = (
+            f"Índice '{index_name}' | seção **{section}** | atributo "
+            f"**{attribute_path}**: anterior={previous_value}, "
+            f"mais recente={latest_value}, variação={variation:.0%}."
+        )
+        details.append(message)
+        if variation > 0.5:
+            errors.append(
+                f"{message} Máximo permitido: 50%."
+            )
 
     def _validate_score_history_fields(
         self,
@@ -1016,6 +1126,10 @@ class ProductDataValidator:
     @staticmethod
     def _is_number(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    @staticmethod
+    def _is_float_score(value: object) -> bool:
+        return isinstance(value, float) and not isinstance(value, bool)
 
     @classmethod
     def _is_valid_score(cls, value: object) -> bool:
