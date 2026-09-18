@@ -21,6 +21,16 @@ class _IndexDocuments:
 class ProductDataValidator:
     """Valida a aplicação do módulo no Cognito e a atualização de seus índices."""
 
+    _SCORE_HISTORY_FIELDS: tuple[tuple[str, str | None], ...] = (
+        ("score", None),
+        ("vulnerabilities", None),
+        ("rsa", "has_rsa"),
+        ("siem", "has_wazuh"),
+        ("cls", None),
+        ("cls_alta", None),
+        ("cls_media", None),
+    )
+
     def __init__(
         self,
         repository: OpenSearchVulnerabilityRepository,
@@ -72,11 +82,17 @@ class ProductDataValidator:
         )
 
     def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(
-            target,
-            "is_in_platform",
-            (("score_history", "@timestamp"),),
+        client, errors, details = self._get_applicable_client(target, "is_in_platform")
+        if client is None:
+            return errors, details
+
+        self._validate_score_history(
+            f"{target.client_id}_score_history",
+            client,
+            errors,
+            details,
         )
+        return errors, details
 
     def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         return self._validate_module_indices(
@@ -84,6 +100,165 @@ class ProductDataValidator:
             "is_saas",
             (("oto_dashboard", "@timestamp"),),
         )
+
+    def _validate_score_history(
+        self,
+        index_name: str,
+        client: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida os scores atual e anterior, mesmo quando o atual está atrasado."""
+        try:
+            candidates = self._repository.get_indices_with_optional_date(
+                index_name,
+                self._reference_date,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao localizar candidatos: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+        if not candidates:
+            errors.append(f"Índice '{index_name}' não encontrado.")
+            return
+
+        index = candidates[0]
+        if index.document_count <= 0:
+            errors.append(f"Índice '{index.name}' não possui documentos.")
+            return
+
+        document = self._get_latest_document(index.name, "date", errors)
+        if document is None:
+            return
+        latest_date = self._get_document_date(index.name, document, "date", errors)
+        if latest_date is None:
+            return
+
+        if latest_date != self._reference_date:
+            errors.append(
+                f"Índice '{index.name}' | documento mais recente com date "
+                f"{latest_date.isoformat()}; último dia encontrado: {latest_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+        else:
+            details.append(
+                f"Índice '{index.name}' | dados de hoje presentes: "
+                f"date={latest_date.isoformat()}."
+            )
+
+        latest_timestamp = self._source(document).get("date")
+        if not isinstance(latest_timestamp, str):
+            errors.append(
+                f"Índice '{index.name}' | documento mais recente sem date válido."
+            )
+            return
+        previous_documents = self._get_previous_day_documents(
+            index.name,
+            latest_timestamp,
+            "date",
+            latest_date,
+            errors,
+        )
+        if previous_documents is None:
+            return
+        if not previous_documents:
+            errors.append(
+                f"Índice '{index.name}' não possui documento no dia anterior "
+                f"ao mais recente ({(latest_date - timedelta(days=1)).isoformat()})."
+            )
+            return
+
+        previous_document = previous_documents[0]
+        previous_date = self._get_document_date(
+            index.name,
+            previous_document,
+            "date",
+            errors,
+        )
+        expected_previous_date = latest_date - timedelta(days=1)
+        if previous_date != expected_previous_date:
+            errors.append(
+                f"Índice '{index.name}' | documento histórico com date "
+                f"{previous_date.isoformat() if previous_date else 'não informado'}; esperado "
+                f"{expected_previous_date.isoformat()}."
+            )
+            return
+        self._validate_score_history_fields(
+            index.name,
+            document,
+            previous_document,
+            client,
+            errors,
+            details,
+        )
+
+    def _validate_score_history_fields(
+        self,
+        index_name: str,
+        latest_document: dict[str, Any],
+        previous_document: dict[str, Any],
+        client: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida valores válidos e variação máxima de 50% nos scores aplicáveis."""
+        latest_source = self._source(latest_document)
+        previous_source = self._source(previous_document)
+        for field_name, required_flag in self._SCORE_HISTORY_FIELDS:
+            if required_flag is not None and not bool(client.get(required_flag)):
+                details.append(
+                    f"Índice '{index_name}' | score {field_name} não aplicável: "
+                    f"{required_flag} desabilitado."
+                )
+                continue
+
+            latest_value = latest_source.get(field_name)
+            previous_value = previous_source.get(field_name)
+            if not self._is_valid_score(latest_value):
+                errors.append(
+                    f"Índice '{index_name}' | score {field_name} inválido no documento "
+                    f"mais recente: {latest_value!r}. Valores 0 e -1 não são permitidos."
+                )
+                continue
+            if not self._is_valid_score(previous_value):
+                errors.append(
+                    f"Índice '{index_name}' | score {field_name} inválido no documento "
+                    f"do dia anterior: {previous_value!r}."
+                )
+                continue
+
+            self._validate_score_history_variation(
+                index_name,
+                field_name,
+                float(latest_value),
+                float(previous_value),
+                errors,
+                details,
+            )
+
+    def _validate_score_history_variation(
+        self,
+        index_name: str,
+        field_name: str,
+        latest_value: float,
+        previous_value: float,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Sinaliza alteração absoluta acima de 50% entre scores consecutivos."""
+        variation = abs(latest_value - previous_value) / abs(previous_value)
+        details.append(
+            f"Índice '{index_name}' | score {field_name}: anterior={previous_value}, "
+            f"mais recente={latest_value}, variação={variation:.0%}."
+        )
+        if variation > 0.5:
+            errors.append(
+                f"Índice '{index_name}' | score {field_name} variou {variation:.0%} "
+                f"(anterior={previous_value}, mais recente={latest_value}); "
+                "máximo permitido: 50%."
+            )
 
     def _validate_module_indices(
         self,
@@ -461,6 +636,21 @@ class ProductDataValidator:
             return None
         return timestamp, document_date
 
+    def _get_document_date(
+        self,
+        index_name: str,
+        document: dict[str, Any],
+        field_name: str,
+        errors: list[str],
+    ) -> date | None:
+        """Extrai uma data de documento sem exigir que ela seja a data de hoje."""
+        document_date = self._parse_date(self._source(document).get(field_name))
+        if document_date is None:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente sem {field_name} válido."
+            )
+        return document_date
+
     def _get_previous_day_documents(
         self,
         index_name: str,
@@ -711,6 +901,10 @@ class ProductDataValidator:
     @staticmethod
     def _is_number(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    @classmethod
+    def _is_valid_score(cls, value: object) -> bool:
+        return cls._is_number(value) and value not in {0, -1}
 
     @staticmethod
     def _parse_date(value: object) -> date | None:
