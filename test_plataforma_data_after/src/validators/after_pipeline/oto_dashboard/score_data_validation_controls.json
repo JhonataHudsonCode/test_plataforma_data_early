@@ -1,0 +1,10 @@
+{
+  "objects": {
+    "historical": {
+      "validation": "historical",
+      "date_field": "date",
+      "value_field": "score",
+      "variation_control": "score_data.historical.score"
+    }
+  }
+}

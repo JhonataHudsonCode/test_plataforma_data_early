@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any
 
 from src.validators.after_pipeline.controllers.oto_score_variation_controller import (
     OtoScoreVariationController,
@@ -11,21 +12,20 @@ from src.validators.after_pipeline.controllers.oto_score_variation_controller im
 class OtoScoreDataValidator:
     """Reúne as validações dos objetos internos de `score_data`."""
 
-    _HISTORICAL_SCORE_CONTROL = "score_data.historical.score"
+    _CONFIGURATION_PATH = Path(__file__).with_name("score_data_validation_controls.json")
+    _VALIDATION_METHODS: dict[str, str] = {
+        "historical": "_validate_historical",
+    }
 
     def __init__(
         self,
         reference_month: str,
         variation_controller: OtoScoreVariationController | None = None,
+        configuration_path: Path | None = None,
     ) -> None:
         self._reference_month = reference_month
         self._variation_controller = variation_controller or OtoScoreVariationController()
-        self._object_validators: dict[
-            str,
-            Callable[[str, object, object, list[str], list[str]], None],
-        ] = {
-            "historical": self._validate_historical,
-        }
+        self._configuration_path = configuration_path or self._CONFIGURATION_PATH
 
     def validate(
         self,
@@ -35,7 +35,7 @@ class OtoScoreDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Valida os objetos de `score_data` usando os dados brutos dos documentos."""
+        """Valida os objetos definidos no JSON usando os dados brutos recebidos."""
         if not isinstance(latest_score_data, dict):
             errors.append(
                 f"Índice '{index_name}' | seção **score_data** ausente ou inválida "
@@ -49,11 +49,30 @@ class OtoScoreDataValidator:
             )
             return
 
-        for object_name, object_validator in self._object_validators.items():
+        try:
+            object_controls = self._load_object_controls()
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao carregar controles de score_data: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        for object_name, control in object_controls.items():
+            validation_name = control.get("validation")
+            method_name = self._VALIDATION_METHODS.get(validation_name)
+            object_validator = getattr(self, method_name, None) if method_name else None
+            if not callable(object_validator):
+                errors.append(
+                    f"Índice '{index_name}' | score_data.{object_name} possui validação "
+                    f"não suportada: {validation_name!r}."
+                )
+                continue
             object_validator(
                 index_name,
                 latest_score_data.get(object_name),
                 previous_score_data.get(object_name),
+                control,
                 errors,
                 details,
             )
@@ -63,13 +82,19 @@ class OtoScoreDataValidator:
         index_name: str,
         latest_historical: object,
         previous_historical: object,
+        control: dict[str, str],
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Valida o item mensal de `score_data.historical`."""
-        latest_item = self._find_reference_month_item(latest_historical)
-        previous_item = self._find_reference_month_item(previous_historical)
-        attribute_path = f"score_data.historical[date={self._reference_month}].score"
+        """Valida o item mensal de `score_data.historical` configurado no JSON."""
+        date_field = control["date_field"]
+        value_field = control["value_field"]
+        variation_control = control["variation_control"]
+        latest_item = self._find_reference_month_item(latest_historical, date_field)
+        previous_item = self._find_reference_month_item(previous_historical, date_field)
+        attribute_path = (
+            f"score_data.historical[{date_field}={self._reference_month}].{value_field}"
+        )
         if latest_item is None:
             errors.append(
                 f"Índice '{index_name}' | atributo **{attribute_path}** ausente "
@@ -83,8 +108,8 @@ class OtoScoreDataValidator:
             )
             return
 
-        latest_value = latest_item.get("score")
-        previous_value = previous_item.get("score")
+        latest_value = latest_item.get(value_field)
+        previous_value = previous_item.get(value_field)
         if not self._is_float(latest_value):
             errors.append(
                 f"Índice '{index_name}' | atributo **{attribute_path}** deve ser float "
@@ -98,38 +123,39 @@ class OtoScoreDataValidator:
             )
             return
 
-        self._validate_historical_score(
+        self._validate_controlled_score(
             index_name,
             attribute_path,
             latest_value,
             previous_value,
+            variation_control,
             errors,
             details,
         )
 
-    def _validate_historical_score(
+    def _validate_controlled_score(
         self,
         index_name: str,
         attribute_path: str,
         latest_value: float,
         previous_value: float,
+        variation_control: str,
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Aplica a política percentual configurada ao score mensal já validado."""
         try:
-            limits = self._variation_controller.limits_for(self._HISTORICAL_SCORE_CONTROL)
+            limits = self._variation_controller.limits_for(variation_control)
         except (OSError, ValueError, json.JSONDecodeError) as error:
             errors.append(
                 f"Índice '{index_name}' | atributo **{attribute_path}** | "
-                f"erro ao carregar controlador '{self._HISTORICAL_SCORE_CONTROL}': "
+                f"erro ao carregar controlador '{variation_control}': "
                 f"{error.__class__.__name__}: {error}"
             )
             return
         if limits is None:
             errors.append(
                 f"Índice '{index_name}' | atributo **{attribute_path}** | "
-                f"controlador '{self._HISTORICAL_SCORE_CONTROL}' não configurado."
+                f"controlador '{variation_control}' não configurado."
             )
             return
 
@@ -149,7 +175,29 @@ class OtoScoreDataValidator:
         if not result.is_valid:
             errors.append(f"{message} Erro: {result.reason}.")
 
-    def _find_reference_month_item(self, historical: object) -> dict[str, Any] | None:
+    def _load_object_controls(self) -> dict[str, dict[str, str]]:
+        configuration = json.loads(self._configuration_path.read_text(encoding="utf-8"))
+        object_controls = configuration.get("objects")
+        if not isinstance(object_controls, dict):
+            raise ValueError("A chave 'objects' deve ser um objeto JSON.")
+        if not all(isinstance(name, str) and isinstance(value, dict) for name, value in object_controls.items()):
+            raise ValueError("Cada objeto de score_data deve possuir uma configuração JSON.")
+        required_fields = {"validation", "date_field", "value_field", "variation_control"}
+        if any(
+            not required_fields.issubset(control)
+            or not all(isinstance(control[field], str) for field in required_fields)
+            for control in object_controls.values()
+        ):
+            raise ValueError(
+                "Cada controle deve possuir validation, date_field, value_field e variation_control."
+            )
+        return object_controls
+
+    def _find_reference_month_item(
+        self,
+        historical: object,
+        date_field: str,
+    ) -> dict[str, Any] | None:
         if not isinstance(historical, list):
             return None
         return next(
@@ -157,8 +205,8 @@ class OtoScoreDataValidator:
                 item
                 for item in historical
                 if isinstance(item, dict)
-                and isinstance(item.get("date"), str)
-                and item["date"].startswith(self._reference_month)
+                and isinstance(item.get(date_field), str)
+                and item[date_field].startswith(self._reference_month)
             ),
             None,
         )
