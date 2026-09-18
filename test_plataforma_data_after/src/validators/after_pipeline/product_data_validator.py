@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import json
+from pathlib import Path
+import re
 from typing import Any, Iterable
 
 from src.config.settings import ClientTarget
@@ -542,6 +545,7 @@ class ProductDataValidator:
             errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
             return None
 
+        self._save_document_source(index_name, self._source(document))
         timestamp = self._source(document).get(timestamp_field)
         document_date = self._parse_date(timestamp)
         if document_date != expected_date:
@@ -556,6 +560,22 @@ class ProductDataValidator:
             f"{timestamp_field} mais recente: {timestamp}."
         )
         return document
+
+    @staticmethod
+    def _save_document_source(index_name: str, source: dict[str, Any]) -> None:
+        """Salva o `_source` retornado para inspeção local durante a execução."""
+        output_directory = Path("reports/debug-documents")
+        safe_index_name = re.sub(r"[^A-Za-z0-9._-]+", "_", index_name)
+        output_path = output_directory / f"{safe_index_name}.json"
+        try:
+            output_directory.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(source, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except OSError:
+            # O dump é somente diagnóstico e não deve alterar o resultado do teste.
+            return
 
     def _get_applicable_client(
         self,
