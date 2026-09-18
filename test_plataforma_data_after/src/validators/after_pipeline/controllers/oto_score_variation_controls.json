@@ -1,0 +1,8 @@
+{
+  "attributes": {
+    "score_data.historical.score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    }
+  }
+}

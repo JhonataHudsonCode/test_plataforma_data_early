@@ -11,6 +11,9 @@ from src.config.settings import ClientTarget
 from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
+from src.validators.after_pipeline.oto_dashboard.score_data_validator import (
+    OtoScoreDataValidator,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +47,7 @@ class ProductDataValidator:
         self._repository = repository
         self._cognito_repository = cognito_repository
         self._reference_date = reference_date or date.today()
+        self._oto_score_data_validator = OtoScoreDataValidator()
 
     def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, "has_asset")
@@ -306,6 +310,19 @@ class ProductDataValidator:
                     f"Índice '{index_name}' | seção **{section}** | atributo "
                     f"**{attribute_path}** deve ser float no documento do dia anterior; "
                     f"recebido {previous_value!r}."
+                )
+                continue
+
+            if attribute_path.startswith("score_data.historical[") and attribute_path.endswith(
+                "].score"
+            ):
+                self._oto_score_data_validator.validate_historical_score(
+                    index_name,
+                    attribute_path,
+                    latest_value,
+                    previous_value,
+                    errors,
+                    details,
                 )
                 continue
 
