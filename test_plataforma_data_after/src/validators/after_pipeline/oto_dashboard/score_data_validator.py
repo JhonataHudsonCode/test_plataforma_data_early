@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from src.validators.after_pipeline.controllers.oto_score_variation_controller import (
     OtoScoreVariationController,
 )
+from src.validators.after_pipeline.oto_dashboard.section_validator import (
+    OtoDashboardSectionValidator,
+)
 
 
-class OtoScoreDataValidator:
+class OtoScoreDataValidator(OtoDashboardSectionValidator):
     """Reúne as validações dos objetos internos de `score_data`."""
 
     _CONFIGURATION_PATH = Path(__file__).with_name("score_data_validation_controls.json")
+    section_name = "score_data"
     _VALIDATION_METHODS: dict[str, str] = {
         "historical": "_validate_historical",
         "current_score": "_validate_current_score",
@@ -20,11 +25,11 @@ class OtoScoreDataValidator:
 
     def __init__(
         self,
-        reference_month: str,
+        reference_date: date,
         variation_controller: OtoScoreVariationController | None = None,
         configuration_path: Path | None = None,
     ) -> None:
-        self._reference_month = reference_month
+        self._reference_month = reference_date.strftime("%Y-%m")
         self._variation_controller = variation_controller or OtoScoreVariationController()
         self._configuration_path = configuration_path or self._CONFIGURATION_PATH
 

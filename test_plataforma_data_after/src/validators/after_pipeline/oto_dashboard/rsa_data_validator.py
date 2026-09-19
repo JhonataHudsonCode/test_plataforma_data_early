@@ -1,24 +1,31 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from src.validators.after_pipeline.controllers.oto_score_variation_controller import (
     OtoScoreVariationController,
 )
+from src.validators.after_pipeline.oto_dashboard.section_validator import (
+    OtoDashboardSectionValidator,
+)
 
 
-class OtoRsaDataValidator:
+class OtoRsaDataValidator(OtoDashboardSectionValidator):
     """Valida os scores expostos pelo objeto pai `rsa_data` do OTO Dashboard."""
 
     _CONFIGURATION_PATH = Path(__file__).with_name("rsa_data_validation_controls.json")
+    section_name = "rsa_data"
 
     def __init__(
         self,
+        reference_date: date,
         variation_controller: OtoScoreVariationController | None = None,
         configuration_path: Path | None = None,
     ) -> None:
+        del reference_date
         self._variation_controller = variation_controller or OtoScoreVariationController()
         self._configuration_path = configuration_path or self._CONFIGURATION_PATH
 
