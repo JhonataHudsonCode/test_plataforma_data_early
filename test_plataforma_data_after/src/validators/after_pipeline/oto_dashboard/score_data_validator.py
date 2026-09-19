@@ -15,6 +15,7 @@ class OtoScoreDataValidator:
     _CONFIGURATION_PATH = Path(__file__).with_name("score_data_validation_controls.json")
     _VALIDATION_METHODS: dict[str, str] = {
         "historical": "_validate_historical",
+        "current_score": "_validate_current_score",
     }
 
     def __init__(
@@ -82,7 +83,7 @@ class OtoScoreDataValidator:
         index_name: str,
         latest_historical: object,
         previous_historical: object,
-        control: dict[str, str],
+        control: dict[str, Any],
         errors: list[str],
         details: list[str],
     ) -> None:
@@ -133,6 +134,58 @@ class OtoScoreDataValidator:
             details,
         )
 
+    def _validate_current_score(
+        self,
+        index_name: str,
+        latest_current_score: object,
+        previous_current_score: object,
+        control: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida cada score atual configurado, separadamente, contra o dia anterior."""
+        if not isinstance(latest_current_score, dict):
+            errors.append(
+                f"Índice '{index_name}' | seção **score_data.current_score** ausente ou "
+                "inválida no documento mais recente."
+            )
+            return
+        if not isinstance(previous_current_score, dict):
+            errors.append(
+                f"Índice '{index_name}' | seção **score_data.current_score** ausente ou "
+                "inválida no documento do dia anterior."
+            )
+            return
+
+        value_fields: list[str] = control["value_fields"]
+        variation_control_prefix: str = control["variation_control_prefix"]
+        for field_name in value_fields:
+            attribute_path = f"score_data.current_score.{field_name}"
+            latest_value = latest_current_score.get(field_name)
+            previous_value = previous_current_score.get(field_name)
+            if not self._is_float(latest_value):
+                errors.append(
+                    f"Índice '{index_name}' | atributo **{attribute_path}** deve ser float "
+                    f"no documento mais recente; recebido {latest_value!r}."
+                )
+                continue
+            if not self._is_float(previous_value):
+                errors.append(
+                    f"Índice '{index_name}' | atributo **{attribute_path}** deve ser float "
+                    f"no documento do dia anterior; recebido {previous_value!r}."
+                )
+                continue
+
+            self._validate_controlled_score(
+                index_name,
+                attribute_path,
+                latest_value,
+                previous_value,
+                f"{variation_control_prefix}{field_name}",
+                errors,
+                details,
+            )
+
     def _validate_controlled_score(
         self,
         index_name: str,
@@ -175,22 +228,39 @@ class OtoScoreDataValidator:
         if not result.is_valid:
             errors.append(f"{message} Erro: {result.reason}.")
 
-    def _load_object_controls(self) -> dict[str, dict[str, str]]:
+    def _load_object_controls(self) -> dict[str, dict[str, Any]]:
         configuration = json.loads(self._configuration_path.read_text(encoding="utf-8"))
         object_controls = configuration.get("objects")
         if not isinstance(object_controls, dict):
             raise ValueError("A chave 'objects' deve ser um objeto JSON.")
         if not all(isinstance(name, str) and isinstance(value, dict) for name, value in object_controls.items()):
             raise ValueError("Cada objeto de score_data deve possuir uma configuração JSON.")
-        required_fields = {"validation", "date_field", "value_field", "variation_control"}
-        if any(
-            not required_fields.issubset(control)
-            or not all(isinstance(control[field], str) for field in required_fields)
-            for control in object_controls.values()
-        ):
-            raise ValueError(
-                "Cada controle deve possuir validation, date_field, value_field e variation_control."
-            )
+        for object_name, control in object_controls.items():
+            validation = control.get("validation")
+            if not isinstance(validation, str):
+                raise ValueError(f"O controle '{object_name}' deve informar 'validation'.")
+            if validation == "historical":
+                required_fields = {"date_field", "value_field", "variation_control"}
+                if not required_fields.issubset(control) or not all(
+                    isinstance(control[field], str) for field in required_fields
+                ):
+                    raise ValueError(
+                        f"O controle '{object_name}' deve possuir date_field, value_field "
+                        "e variation_control como texto."
+                    )
+            elif validation == "current_score":
+                value_fields = control.get("value_fields")
+                variation_control_prefix = control.get("variation_control_prefix")
+                if (
+                    not isinstance(value_fields, list)
+                    or not value_fields
+                    or not all(isinstance(field, str) for field in value_fields)
+                    or not isinstance(variation_control_prefix, str)
+                ):
+                    raise ValueError(
+                        f"O controle '{object_name}' deve possuir value_fields e "
+                        "variation_control_prefix válidos."
+                    )
         return object_controls
 
     def _find_reference_month_item(

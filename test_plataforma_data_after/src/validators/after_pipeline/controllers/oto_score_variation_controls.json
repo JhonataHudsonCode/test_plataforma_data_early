@@ -3,6 +3,34 @@
     "score_data.historical.score": {
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.rsa": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.vulnerabilities": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.siem": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.cis": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.threat_intelligence": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.current_score.assessment": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
     }
   }
 }

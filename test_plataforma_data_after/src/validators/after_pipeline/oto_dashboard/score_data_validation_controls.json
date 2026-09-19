@@ -5,6 +5,19 @@
       "date_field": "date",
       "value_field": "score",
       "variation_control": "score_data.historical.score"
+    },
+    "current_score": {
+      "validation": "current_score",
+      "value_fields": [
+        "rsa",
+        "score",
+        "vulnerabilities",
+        "siem",
+        "cis",
+        "threat_intelligence",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.current_score."
     }
   }
 }
