@@ -18,6 +18,31 @@
         "assessment"
       ],
       "variation_control_prefix": "score_data.current_score."
+    },
+    "prediction_score": {
+      "validation": "prediction_score",
+      "value_fields": [
+        "rsa",
+        "score",
+        "vulnerabilities",
+        "siem",
+        "cis",
+        "threat_intelligence",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.prediction_score."
+    },
+    "variation_data": {
+      "validation": "variation_data",
+      "value_fields": [
+        "vulnerabilities",
+        "rsa",
+        "siem",
+        "cis",
+        "threat_intelligence",
+        "assessment"
+      ],
+      "nested_value_fields": ["current", "past", "variation"]
     }
   }
 }

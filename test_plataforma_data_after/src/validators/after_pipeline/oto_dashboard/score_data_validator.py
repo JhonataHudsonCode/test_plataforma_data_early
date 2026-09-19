@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
     _VALIDATION_METHODS: dict[str, str] = {
         "historical": "_validate_historical",
         "current_score": "_validate_current_score",
+        "prediction_score": "_validate_prediction_score",
+        "variation_data": "_validate_variation_data",
     }
 
     def __init__(
@@ -148,16 +151,55 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Valida cada score atual configurado, separadamente, contra o dia anterior."""
-        if not isinstance(latest_current_score, dict):
+        self._validate_score_values(
+            index_name,
+            "current_score",
+            latest_current_score,
+            previous_current_score,
+            control,
+            errors,
+            details,
+        )
+
+    def _validate_prediction_score(
+        self,
+        index_name: str,
+        latest_prediction_score: object,
+        previous_prediction_score: object,
+        control: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        self._validate_score_values(
+            index_name,
+            "prediction_score",
+            latest_prediction_score,
+            previous_prediction_score,
+            control,
+            errors,
+            details,
+        )
+
+    def _validate_score_values(
+        self,
+        index_name: str,
+        object_name: str,
+        latest_values: object,
+        previous_values: object,
+        control: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida os campos numéricos de um objeto de score contra o dia anterior."""
+        if not isinstance(latest_values, dict):
             errors.append(
-                f"Índice '{index_name}' | seção **score_data.current_score** ausente ou "
+                f"Índice '{index_name}' | seção **score_data.{object_name}** ausente ou "
                 "inválida no documento mais recente."
             )
             return
-        if not isinstance(previous_current_score, dict):
+        if not isinstance(previous_values, dict):
             errors.append(
-                f"Índice '{index_name}' | seção **score_data.current_score** ausente ou "
+                f"Índice '{index_name}' | seção **score_data.{object_name}** ausente ou "
                 "inválida no documento do dia anterior."
             )
             return
@@ -165,9 +207,9 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
         value_fields: list[str] = control["value_fields"]
         variation_control_prefix: str = control["variation_control_prefix"]
         for field_name in value_fields:
-            attribute_path = f"score_data.current_score.{field_name}"
-            latest_value = latest_current_score.get(field_name)
-            previous_value = previous_current_score.get(field_name)
+            attribute_path = f"score_data.{object_name}.{field_name}"
+            latest_value = latest_values.get(field_name)
+            previous_value = previous_values.get(field_name)
             if not self._is_float(latest_value):
                 errors.append(
                     f"Índice '{index_name}' | atributo **{attribute_path}** deve ser float "
@@ -189,6 +231,100 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
                 f"{variation_control_prefix}{field_name}",
                 errors,
                 details,
+            )
+
+    def _validate_variation_data(
+        self,
+        index_name: str,
+        latest_variation_data: object,
+        previous_variation_data: object,
+        control: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida os valores e a coerência das variações calculadas por módulo."""
+        value_fields: list[str] = control["value_fields"]
+        nested_value_fields: list[str] = control["nested_value_fields"]
+        self._validate_variation_document(
+            index_name,
+            "mais recente",
+            latest_variation_data,
+            value_fields,
+            nested_value_fields,
+            errors,
+            details,
+        )
+        self._validate_variation_document(
+            index_name,
+            "do dia anterior",
+            previous_variation_data,
+            value_fields,
+            nested_value_fields,
+            errors,
+            details,
+        )
+
+    def _validate_variation_document(
+        self,
+        index_name: str,
+        document_label: str,
+        variation_data: object,
+        value_fields: list[str],
+        nested_value_fields: list[str],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if not isinstance(variation_data, dict):
+            errors.append(
+                f"Índice '{index_name}' | seção **score_data.variation_data** ausente ou "
+                f"inválida no documento {document_label}."
+            )
+            return
+
+        for field_name in value_fields:
+            attribute_path = f"score_data.variation_data.{field_name}"
+            values = variation_data.get(field_name)
+            if not isinstance(values, dict):
+                errors.append(
+                    f"Índice '{index_name}' | atributo **{attribute_path}** ausente ou "
+                    f"inválido no documento {document_label}."
+                )
+                continue
+
+            invalid_fields = [
+                nested_field
+                for nested_field in nested_value_fields
+                if not self._is_float(values.get(nested_field))
+            ]
+            if invalid_fields:
+                errors.append(
+                    f"Índice '{index_name}' | atributo **{attribute_path}** no documento "
+                    f"{document_label} deve conter float em {', '.join(invalid_fields)}."
+                )
+                continue
+
+            current = values["current"]
+            past = values["past"]
+            variation = values["variation"]
+            expected_variation = self._calculate_variation(current, past)
+            if expected_variation is None:
+                errors.append(
+                    f"Índice '{index_name}' | atributo **{attribute_path}** no documento "
+                    f"{document_label} possui past=0.0 e a variação não pode ser conferida."
+                )
+                continue
+            if not math.isclose(variation, expected_variation, abs_tol=0.01):
+                errors.append(
+                    f"Índice '{index_name}' | atributo **{attribute_path}.variation** "
+                    f"incoerente no documento {document_label}: recebido={variation}, "
+                    f"esperado≈{expected_variation:.2f}."
+                )
+                continue
+
+            details.append(
+                f"Índice '{index_name}' | seção **score_data.variation_data** | atributo "
+                f"**{attribute_path}** no documento {document_label}: current={current}, "
+                f"past={past}, variation={variation:.2f}; valores e cálculo válidos."
             )
 
     def _validate_controlled_score(
@@ -253,7 +389,7 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
                         f"O controle '{object_name}' deve possuir date_field, value_field "
                         "e variation_control como texto."
                     )
-            elif validation == "current_score":
+            elif validation in {"current_score", "prediction_score"}:
                 value_fields = control.get("value_fields")
                 variation_control_prefix = control.get("variation_control_prefix")
                 if (
@@ -265,6 +401,19 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
                     raise ValueError(
                         f"O controle '{object_name}' deve possuir value_fields e "
                         "variation_control_prefix válidos."
+                    )
+            elif validation == "variation_data":
+                value_fields = control.get("value_fields")
+                nested_value_fields = control.get("nested_value_fields")
+                if (
+                    not isinstance(value_fields, list)
+                    or not value_fields
+                    or not all(isinstance(field, str) for field in value_fields)
+                    or not isinstance(nested_value_fields, list)
+                    or set(nested_value_fields) != {"current", "past", "variation"}
+                ):
+                    raise ValueError(
+                        f"O controle '{object_name}' deve possuir campos de variação válidos."
                     )
         return object_controls
 
@@ -289,3 +438,9 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
     @staticmethod
     def _is_float(value: object) -> bool:
         return isinstance(value, float) and not isinstance(value, bool)
+
+    @staticmethod
+    def _calculate_variation(current: float, past: float) -> float | None:
+        if past == 0.0:
+            return None
+        return (current - past) / abs(past)
