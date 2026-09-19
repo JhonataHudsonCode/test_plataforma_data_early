@@ -31,6 +31,18 @@
     "score_data.current_score.assessment": {
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
+    },
+    "rsa_data.current_score_rsa": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "rsa_data.estimate_new_score_by_rsa": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "rsa_data.impact": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
     }
   }
 }

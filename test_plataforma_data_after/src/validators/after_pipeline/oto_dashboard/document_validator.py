@@ -6,6 +6,9 @@ from typing import Any
 from src.validators.after_pipeline.oto_dashboard.score_data_validator import (
     OtoScoreDataValidator,
 )
+from src.validators.after_pipeline.oto_dashboard.rsa_data_validator import (
+    OtoRsaDataValidator,
+)
 
 
 class OtoDashboardDocumentValidator:
@@ -15,6 +18,7 @@ class OtoDashboardDocumentValidator:
         reference_month = reference_date.strftime("%Y-%m")
         self._section_validators = {
             "score_data": OtoScoreDataValidator(reference_month),
+            "rsa_data": OtoRsaDataValidator(),
         }
 
     def validate(
