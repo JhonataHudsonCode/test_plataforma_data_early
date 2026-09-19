@@ -60,6 +60,58 @@
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
     },
+    "score_data.estimate_new_score.rsa": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.estimate_new_score.score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.estimate_new_score.vulnerabilities": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.estimate_new_score.threat_intelligence": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.estimate_new_score.siem": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.estimate_new_score.cis": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.estimate_new_score.assessment": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.impact.rsa": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.impact.vulnerabilities": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.impact.threat_intelligence": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.impact.siem": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.impact.cis": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "score_data.impact.assessment": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
     "rsa_data.current_score_rsa": {
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
@@ -69,6 +121,74 @@
       "maximum_decrease_percentage": 50
     },
     "rsa_data.impact": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "asset_data.no_monitored_vuln": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "asset_data.total": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "asset_data.no_monitored_events": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "asset_data.monitored_vuln": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "asset_data.monitored_events": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "siem_data.improvement.waiting_client_rate": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "siem_data.improvement.incident_rate": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "siem_data.improvement.observability_increment": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "assessment_data.improvement.high_findings": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "threat_intelligence_data.current_threat_intelligence_score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "threat_intelligence_data.estimate_new_score_by_threat_intelligence": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "threat_intelligence_data.impact": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "cis_data.current_cis_score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "cis_data.estimate_new_score_by_cis": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "cis_data.impact": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "cis_data.improvement.cis_media": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "cis_data.improvement.cis_baixa": {
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
     }

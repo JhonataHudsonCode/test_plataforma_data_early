@@ -1,0 +1,10 @@
+{
+  "value_fields": [
+    "no_monitored_vuln",
+    "total",
+    "no_monitored_events",
+    "monitored_vuln",
+    "monitored_events"
+  ],
+  "variation_control_prefix": "asset_data."
+}

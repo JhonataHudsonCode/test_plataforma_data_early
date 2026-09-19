@@ -21,8 +21,7 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
     section_name = "score_data"
     _VALIDATION_METHODS: dict[str, str] = {
         "historical": "_validate_historical",
-        "current_score": "_validate_current_score",
-        "prediction_score": "_validate_prediction_score",
+        "score_values": "_validate_score_values",
         "variation_data": "_validate_variation_data",
     }
 
@@ -142,48 +141,9 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
             details,
         )
 
-    def _validate_current_score(
-        self,
-        index_name: str,
-        latest_current_score: object,
-        previous_current_score: object,
-        control: dict[str, Any],
-        errors: list[str],
-        details: list[str],
-    ) -> None:
-        self._validate_score_values(
-            index_name,
-            "current_score",
-            latest_current_score,
-            previous_current_score,
-            control,
-            errors,
-            details,
-        )
-
-    def _validate_prediction_score(
-        self,
-        index_name: str,
-        latest_prediction_score: object,
-        previous_prediction_score: object,
-        control: dict[str, Any],
-        errors: list[str],
-        details: list[str],
-    ) -> None:
-        self._validate_score_values(
-            index_name,
-            "prediction_score",
-            latest_prediction_score,
-            previous_prediction_score,
-            control,
-            errors,
-            details,
-        )
-
     def _validate_score_values(
         self,
         index_name: str,
-        object_name: str,
         latest_values: object,
         previous_values: object,
         control: dict[str, Any],
@@ -191,6 +151,7 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
         details: list[str],
     ) -> None:
         """Valida os campos numéricos de um objeto de score contra o dia anterior."""
+        object_name: str = control["object_name"]
         if not isinstance(latest_values, dict):
             errors.append(
                 f"Índice '{index_name}' | seção **score_data.{object_name}** ausente ou "
@@ -389,11 +350,12 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
                         f"O controle '{object_name}' deve possuir date_field, value_field "
                         "e variation_control como texto."
                     )
-            elif validation in {"current_score", "prediction_score"}:
+            elif validation == "score_values":
                 value_fields = control.get("value_fields")
                 variation_control_prefix = control.get("variation_control_prefix")
                 if (
-                    not isinstance(value_fields, list)
+                    not isinstance(control.get("object_name"), str)
+                    or not isinstance(value_fields, list)
                     or not value_fields
                     or not all(isinstance(field, str) for field in value_fields)
                     or not isinstance(variation_control_prefix, str)

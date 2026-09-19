@@ -1,0 +1,11 @@
+{
+  "value_fields": [
+    "current_cis_score",
+    "estimate_new_score_by_cis",
+    "impact"
+  ],
+  "nested_objects": {
+    "improvement": ["cis_media", "cis_baixa"]
+  },
+  "variation_control_prefix": "cis_data."
+}

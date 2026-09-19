@@ -1,0 +1,7 @@
+{
+  "object_name": "improvement",
+  "fields": {
+    "high_findings": "float"
+  },
+  "variation_control_prefix": "assessment_data.improvement."
+}

@@ -1,0 +1,9 @@
+{
+  "object_name": "improvement",
+  "fields": {
+    "waiting_client_rate": "float",
+    "incident_rate": "float",
+    "observability_increment": "int"
+  },
+  "variation_control_prefix": "siem_data.improvement."
+}

@@ -1,0 +1,8 @@
+{
+  "value_fields": [
+    "current_threat_intelligence_score",
+    "estimate_new_score_by_threat_intelligence",
+    "impact"
+  ],
+  "variation_control_prefix": "threat_intelligence_data."
+}

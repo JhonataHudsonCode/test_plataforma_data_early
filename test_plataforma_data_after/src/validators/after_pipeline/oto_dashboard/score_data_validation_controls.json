@@ -7,7 +7,8 @@
       "variation_control": "score_data.historical.score"
     },
     "current_score": {
-      "validation": "current_score",
+      "validation": "score_values",
+      "object_name": "current_score",
       "value_fields": [
         "rsa",
         "score",
@@ -20,7 +21,8 @@
       "variation_control_prefix": "score_data.current_score."
     },
     "prediction_score": {
-      "validation": "prediction_score",
+      "validation": "score_values",
+      "object_name": "prediction_score",
       "value_fields": [
         "rsa",
         "score",
@@ -31,6 +33,33 @@
         "assessment"
       ],
       "variation_control_prefix": "score_data.prediction_score."
+    },
+    "estimate_new_score": {
+      "validation": "score_values",
+      "object_name": "estimate_new_score",
+      "value_fields": [
+        "rsa",
+        "score",
+        "vulnerabilities",
+        "threat_intelligence",
+        "siem",
+        "cis",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.estimate_new_score."
+    },
+    "impact": {
+      "validation": "score_values",
+      "object_name": "impact",
+      "value_fields": [
+        "rsa",
+        "vulnerabilities",
+        "threat_intelligence",
+        "siem",
+        "cis",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.impact."
     },
     "variation_data": {
       "validation": "variation_data",
