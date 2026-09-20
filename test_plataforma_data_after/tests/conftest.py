@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+import inspect
 
 import pytest
 import subprocess
@@ -44,6 +45,28 @@ def _report_has_failures(report: str) -> bool:
     return any(
         line.startswith("Falhas (") and not line.startswith("Falhas (0)")
         for line in report.splitlines()
+    )
+
+
+def _send_report_email(
+    email_service: EmailService,
+    subject: str,
+    body: str,
+    report_path: Path,
+) -> bool:
+    """Envia HTML quando a versão instalada do serviço o suporta."""
+    send_email = email_service.send_email
+    if "html_body" not in inspect.signature(send_email).parameters:
+        print(
+            "Aviso: EmailService instalado não suporta html_body; "
+            "o relatório será enviado em texto simples."
+        )
+        return send_email(subject, body)
+
+    return send_email(
+        subject,
+        body,
+        html_body=ClientValidationReport.email_html_from_text(report_path),
     )
 
 def pytest_sessionstart(session):
@@ -91,10 +114,11 @@ def pytest_sessionfinish(session, exitstatus):
     try:
         email_service = EmailService()
         for report_path, body in failed_reports:
-            email_sent = email_service.send_email(
+            email_sent = _send_report_email(
+                email_service,
                 f"Relatório de Testes - {report_path.stem}",
                 body,
-                html_body=ClientValidationReport.email_html_from_text(report_path),
+                report_path,
             )
             if email_sent:
                 print(f"Relatório aceito pelo servidor SMTP: {report_path.name}")

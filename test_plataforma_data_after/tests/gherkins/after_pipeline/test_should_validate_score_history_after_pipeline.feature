@@ -1,10 +1,10 @@
 # language: pt
 
-Funcionalidade: Validação pós-pipeline de score
+Funcionalidade: Validação do índice score_history pós-pipeline
 
-Cenário: Validar score e comparativos
+Cenário: Validar scores do histórico recente
   Dado um cliente habilitado na plataforma
   Quando o pipeline de processamento finalizar
-  Então o score_history deve conter documento de hoje e do mês corrente
+  Então o índice {cliente}_score_history deve conter documentos recentes
   E os subscores dos módulos habilitados devem ser válidos
-  E os comparativos global e setorial devem estar calculados
+  E a variação entre documentos consecutivos deve respeitar o limite permitido

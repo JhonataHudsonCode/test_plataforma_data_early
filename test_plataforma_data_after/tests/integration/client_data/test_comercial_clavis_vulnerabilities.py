@@ -51,7 +51,7 @@ def _assert_validation(
     report.assert_no_failures()
 
 
-@allure.title("Validar ativos e atualização de índices")
+@allure.title("Validar {cliente}_asset*, asset-historical-observability e asset-historical-software")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -68,7 +68,7 @@ def test_should_validate_assets_and_inventory_variation_after_pipeline(
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
-@allure.title("Validar dados de compliance")
+@allure.title("Validar {cliente}_asset-compliance e asset-policy-compliance")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -85,7 +85,7 @@ def test_should_validate_compliance_after_pipeline(
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
-@allure.title("Validar softwares obrigatórios e homologados")
+@allure.title("Validar {cliente}_authorized-software e mandatory-software")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -102,7 +102,7 @@ def test_should_validate_software_policies_after_pipeline(
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
-@allure.title("Validar índice de score")
+@allure.title("Validar índice {cliente}_score_history")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -119,7 +119,7 @@ def test_should_validate_score_history_after_pipeline(
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
-@allure.title("Validar índice OTO Dashboard")
+@allure.title("Validar índice {cliente}_oto_dashboard*")
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.opensearch
@@ -136,7 +136,7 @@ def test_should_validate_oto_dashboard_after_pipeline(
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
-@allure.title("Validar aliases do OpenSearch")
+@allure.title("Validar aliases e índices de destino do OpenSearch")
 @pytest.mark.integration
 @pytest.mark.opensearch
 def test_should_validate_opensearch_aliases_after_pipeline(

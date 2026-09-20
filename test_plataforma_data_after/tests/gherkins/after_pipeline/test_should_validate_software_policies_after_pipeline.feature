@@ -1,8 +1,9 @@
 # language: pt
 
-Funcionalidade: Validação pós-pipeline de softwares
+Funcionalidade: Validação das políticas de software pós-pipeline
 
-Cenário: Validar softwares obrigatórios e homologados
+Cenário: Validar documentos e mapping de políticas de software
   Dado um cliente com has_asset habilitado
   Quando o pipeline de processamento finalizar
-  Então os índices authorized-software e mandatory-software devem conter documentos de hoje
+  Então os índices {cliente}_authorized-software e mandatory-software devem possuir documentos válidos
+  E os mappings devem corresponder ao contrato esperado
