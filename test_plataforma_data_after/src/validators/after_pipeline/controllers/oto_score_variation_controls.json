@@ -156,6 +156,18 @@
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
     },
+    "siem_data.current_siem_score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "siem_data.estimate_new_score_by_siem": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "siem_data.impact": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
     "assessment_data.improvement.high_findings": {
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50

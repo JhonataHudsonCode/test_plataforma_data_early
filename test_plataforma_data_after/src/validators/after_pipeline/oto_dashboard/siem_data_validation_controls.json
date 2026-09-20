@@ -1,4 +1,9 @@
 {
+  "value_fields": {
+    "current_siem_score": "float",
+    "estimate_new_score_by_siem": "float",
+    "impact": "float"
+  },
   "object_name": "improvement",
   "fields": {
     "waiting_client_rate": "float",
