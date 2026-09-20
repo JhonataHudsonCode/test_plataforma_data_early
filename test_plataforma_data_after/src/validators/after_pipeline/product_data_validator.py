@@ -90,7 +90,13 @@ class ProductDataValidator:
         }
         for suffix, expected_mapping in historical_mappings.items():
             index_name = f"{target.client_id}_{suffix}"
-            documents = self._validate_index(index_name, "date", errors, details)
+            documents = self._validate_index(
+                index_name,
+                "date",
+                errors,
+                details,
+                continue_when_outdated=True,
+            )
             self._validate_mapping(index_name, expected_mapping, errors, details)
             if documents is not None and documents.previous is not None:
                 self._validate_assets_variation(
@@ -559,6 +565,7 @@ class ProductDataValidator:
             timestamp_field,
             errors,
             details,
+            continue_when_outdated=True,
         )
         previous_document = self._validate_dated_index_document(
             previous_index_name,
@@ -566,6 +573,7 @@ class ProductDataValidator:
             timestamp_field,
             errors,
             details,
+            continue_when_outdated=True,
         )
         if current_document is not None and previous_document is not None:
             self._validate_assets_variation(
@@ -617,6 +625,7 @@ class ProductDataValidator:
         timestamp_field: str,
         errors: list[str],
         details: list[str],
+        continue_when_outdated: bool = False,
     ) -> dict[str, Any] | None:
         try:
             index = next(
@@ -647,10 +656,12 @@ class ProductDataValidator:
         if document_date != expected_date:
             errors.append(
                 f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
-                f"{timestamp or 'não informado'}; esperado "
-                f"{expected_date.isoformat()}."
+                f"{timestamp or 'não informado'}; última data encontrada: "
+                f"{document_date.isoformat() if document_date else 'não informada'}; "
+                f"esperado {expected_date.isoformat()}."
             )
-            return None
+            if not continue_when_outdated:
+                return None
         details.append(
             f"Índice '{index_name}' validado: {index.document_count} documento(s); "
             f"{timestamp_field} mais recente: {timestamp}."
@@ -710,6 +721,7 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
         compare_previous_day: bool = True,
+        continue_when_outdated: bool = False,
     ) -> _IndexDocuments | None:
         """Orquestra a validação genérica de atualização de um índice."""
         index_name = (
@@ -730,6 +742,7 @@ class ProductDataValidator:
             document,
             timestamp_field,
             errors,
+            continue_when_outdated,
         )
         if timestamp_and_date is None:
             return None
@@ -765,10 +778,17 @@ class ProductDataValidator:
             previous_document = None
         else:
             previous_document = previous_day_documents[0]
-        details.append(
-            f"Índice '{index_name}' possui {index.document_count} documento(s); "
-            "documento mais recente é de hoje."
-        )
+        if document_date == self._reference_date:
+            details.append(
+                f"Índice '{index_name}' possui {index.document_count} documento(s); "
+                "documento mais recente é de hoje."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' possui {index.document_count} documento(s); "
+                f"documento mais recente de {document_date.isoformat()} será usado nas "
+                "demais validações."
+            )
         return _IndexDocuments(latest=document, previous=previous_document)
 
     def _get_available_index(
@@ -829,6 +849,7 @@ class ProductDataValidator:
         document: dict[str, Any],
         timestamp_field: str,
         errors: list[str],
+        continue_when_outdated: bool = False,
     ) -> tuple[str, date] | None:
         """Garante que o campo temporal do documento mais recente seja de hoje."""
         timestamp = self._source(document).get(timestamp_field)
@@ -844,7 +865,8 @@ class ProductDataValidator:
                 f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
                 f"esperado {self._reference_date.isoformat()}."
             )
-            return None
+            if not continue_when_outdated:
+                return None
         return timestamp, document_date
 
     def _get_document_date(
