@@ -35,7 +35,7 @@
       "variation_control_prefix": "score_data.prediction_score."
     },
     "estimate_new_score": {
-      "validation": "score_values",
+      "validation": "estimate_new_score",
       "object_name": "estimate_new_score",
       "value_fields": [
         "rsa",
@@ -49,7 +49,7 @@
       "variation_control_prefix": "score_data.estimate_new_score."
     },
     "impact": {
-      "validation": "score_values",
+      "validation": "impact",
       "object_name": "impact",
       "value_fields": [
         "rsa",

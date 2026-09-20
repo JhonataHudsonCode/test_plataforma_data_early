@@ -23,6 +23,8 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
         "historical": "_validate_historical",
         "score_values": "_validate_score_values",
         "variation_data": "_validate_variation_data",
+        "estimate_new_score": "_validate_estimate_new_score",
+        "impact": "_validate_impact",
     }
 
     def __init__(
@@ -194,6 +196,44 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
                 details,
             )
 
+    def _validate_estimate_new_score(
+        self,
+        index_name: str,
+        latest_estimate_new_score: object,
+        previous_estimate_new_score: object,
+        control: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida os atributos configurados de `score_data.estimate_new_score`."""
+        self._validate_score_values(
+            index_name,
+            latest_estimate_new_score,
+            previous_estimate_new_score,
+            control,
+            errors,
+            details,
+        )
+
+    def _validate_impact(
+        self,
+        index_name: str,
+        latest_impact: object,
+        previous_impact: object,
+        control: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida os atributos configurados de `score_data.impact`."""
+        self._validate_score_values(
+            index_name,
+            latest_impact,
+            previous_impact,
+            control,
+            errors,
+            details,
+        )
+
     def _validate_variation_data(
         self,
         index_name: str,
@@ -350,7 +390,7 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
                         f"O controle '{object_name}' deve possuir date_field, value_field "
                         "e variation_control como texto."
                     )
-            elif validation == "score_values":
+            elif validation in {"score_values", "estimate_new_score", "impact"}:
                 value_fields = control.get("value_fields")
                 variation_control_prefix = control.get("variation_control_prefix")
                 if (
