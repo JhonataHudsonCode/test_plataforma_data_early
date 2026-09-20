@@ -8,12 +8,35 @@ import re
 from typing import Any, Iterable
 
 from src.config.settings import ClientTarget
+from src.models.opensearch_product.asset_compliance_mapping import (
+    EXPECTED_ASSET_COMPLIANCE_MAPPING,
+)
+from src.models.opensearch_product.asset_historical_observability_mapping import (
+    EXPECTED_ASSET_HISTORICAL_OBSERVABILITY_MAPPING,
+)
+from src.models.opensearch_product.asset_historical_software_mapping import (
+    EXPECTED_ASSET_HISTORICAL_SOFTWARE_MAPPING,
+)
+from src.models.opensearch_product.asset_policy_compliance_mapping import (
+    EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+)
+from src.models.opensearch_product.client_asset_mapping import EXPECTED_CLIENT_ASSET_MAPPING
+from src.models.opensearch_product.software_policy_mapping import (
+    EXPECTED_SOFTWARE_POLICY_MAPPING,
+)
+from src.models.opensearch_product.score_history_mapping import (
+    EXPECTED_SCORE_HISTORY_MAPPING,
+)
+from src.models.opensearch_product.oto_dashboard_mapping import (
+    EXPECTED_OTO_DASHBOARD_MAPPING,
+)
 from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 from src.validators.after_pipeline.oto_dashboard.document_validator import (
     OtoDashboardDocumentValidator,
 )
+from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,12 +80,18 @@ class ProductDataValidator:
         self._validate_dated_asset_indices(
             target.client_id,
             "@timestamp",
+            EXPECTED_CLIENT_ASSET_MAPPING,
             errors,
             details,
         )
-        for suffix in ("asset-historical-observability", "asset-historical-software"):
+        historical_mappings = {
+            "asset-historical-observability": EXPECTED_ASSET_HISTORICAL_OBSERVABILITY_MAPPING,
+            "asset-historical-software": EXPECTED_ASSET_HISTORICAL_SOFTWARE_MAPPING,
+        }
+        for suffix, expected_mapping in historical_mappings.items():
             index_name = f"{target.client_id}_{suffix}"
             documents = self._validate_index(index_name, "date", errors, details)
+            self._validate_mapping(index_name, expected_mapping, errors, details)
             if documents is not None and documents.previous is not None:
                 self._validate_assets_variation(
                     index_name,
@@ -79,6 +108,10 @@ class ProductDataValidator:
             "has_wazuh",
             (("asset-compliance", "@timestamp"), ("asset-policy-compliance", "@timestamp")),
             validate_creation_date=True,
+            expected_mappings={
+                "asset-compliance": EXPECTED_ASSET_COMPLIANCE_MAPPING,
+                "asset-policy-compliance": EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+            },
         )
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
@@ -87,6 +120,10 @@ class ProductDataValidator:
             "has_asset",
             (("authorized-software", "lastupdated"), ("mandatory-software", "lastupdated")),
             compare_previous_day=False,
+            expected_mappings={
+                "authorized-software": EXPECTED_SOFTWARE_POLICY_MAPPING,
+                "mandatory-software": EXPECTED_SOFTWARE_POLICY_MAPPING,
+            },
         )
 
     def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
@@ -94,8 +131,15 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
+        index_name = f"{target.client_id}_score_history"
+        self._validate_mapping(
+            index_name,
+            EXPECTED_SCORE_HISTORY_MAPPING,
+            errors,
+            details,
+        )
         self._validate_score_history(
-            f"{target.client_id}_score_history",
+            index_name,
             client,
             errors,
             details,
@@ -241,6 +285,19 @@ class ProductDataValidator:
         if current_index_name is None or previous_index_name is None:
             return
 
+        self._validate_mapping(
+            current_index_name,
+            EXPECTED_OTO_DASHBOARD_MAPPING,
+            errors,
+            details,
+        )
+        self._validate_mapping(
+            previous_index_name,
+            EXPECTED_OTO_DASHBOARD_MAPPING,
+            errors,
+            details,
+        )
+
         current_document = self._validate_dated_index_document(
             current_index_name,
             self._reference_date,
@@ -355,6 +412,7 @@ class ProductDataValidator:
         validate_creation_date: bool = False,
         compare_previous_day: bool = True,
         expected_value: object = True,
+        expected_mappings: dict[str, dict[str, str | dict[str, Any]]] | None = None,
     ) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(
             target,
@@ -373,6 +431,7 @@ class ProductDataValidator:
                 details,
                 validate_creation_date,
                 compare_previous_day,
+                expected_mappings.get(suffix) if expected_mappings else None,
             )
         return errors, details
 
@@ -384,6 +443,7 @@ class ProductDataValidator:
         details: list[str],
         validate_creation_date: bool = False,
         compare_previous_day: bool = True,
+        expected_mapping: dict[str, str | dict[str, Any]] | None = None,
     ) -> None:
         """Valida o índice fixo ou sua versão diária com data no sufixo."""
         try:
@@ -410,6 +470,8 @@ class ProductDataValidator:
             f"{', '.join(candidate.name for candidate in candidate_indices)}."
         )
         for candidate_index in candidate_indices:
+            if expected_mapping is not None:
+                self._validate_mapping(candidate_index.name, expected_mapping, errors, details)
             if validate_creation_date:
                 self._validate_index_creation_date(candidate_index, errors, details)
             else:
@@ -455,6 +517,7 @@ class ProductDataValidator:
         self,
         client_id: str,
         timestamp_field: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
         errors: list[str],
         details: list[str],
     ) -> None:
@@ -488,6 +551,8 @@ class ProductDataValidator:
         if current_index_name is None or previous_index_name is None:
             return
 
+        self._validate_mapping(current_index_name, expected_mapping, errors, details)
+
         current_document = self._validate_dated_index_document(
             current_index_name,
             self._reference_date,
@@ -510,6 +575,40 @@ class ProductDataValidator:
                 errors,
                 details,
             )
+
+    def _validate_mapping(
+        self,
+        index_name: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara o mapping efetivo do índice com o contrato do respectivo produto."""
+        try:
+            metadata = self._repository.get_index_metadata(index_name)
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar mapping: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        actual_properties = metadata.mapping.get("properties")
+        if not isinstance(actual_properties, dict):
+            errors.append(f"Índice '{index_name}' | mapping sem propriedades configuradas.")
+            return
+
+        mapping_errors = OpenSearchMappingValidator().validate(
+            actual_properties,
+            expected_mapping,
+        )
+        if mapping_errors:
+            errors.extend(
+                f"Índice '{index_name}' | mapping inválido: {mapping_error}"
+                for mapping_error in mapping_errors
+            )
+            return
+        details.append(f"Índice '{index_name}' | mapping validado com sucesso.")
 
     def _validate_dated_index_document(
         self,

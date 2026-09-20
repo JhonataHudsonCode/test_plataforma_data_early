@@ -29,12 +29,6 @@ class OpenSearchMappingValidator:
             field_path = f"{path}.{field_name}" if path else field_name
             actual_definition = actual_properties.get(field_name)
 
-            print(
-                f"[MAPPING] ATRIBUTO={field_path} | "
-                f"RESULTADO ESPERADO={expected_definition!r} | "
-                f"RESULTADO OBTIDO={actual_definition!r}"
-            )
-
             if actual_definition is None:
                 errors.append(f"Campo ausente no mapping: {field_path}")
                 continue
@@ -60,7 +54,7 @@ class OpenSearchMappingValidator:
             if actual_type != expected_definition:
                 errors.append(
                     f"Tipo incorreto para {field_path}. "
-                    f"Esperado: {actual_type}; encontrado: {expected_definition}"
+                    f"Esperado: {expected_definition}; encontrado: {actual_type}"
                 )
 
         return errors

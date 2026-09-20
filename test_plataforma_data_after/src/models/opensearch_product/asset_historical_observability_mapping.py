@@ -5,6 +5,7 @@ from typing import Any
 ASSET_HISTORICAL_OBSERVABILITY_INDEX_NAME = "asset-historical-observability"
 
 EXPECTED_ASSET_HISTORICAL_OBSERVABILITY_MAPPING: dict[str, str | dict[str, Any]] = {
+    "agent_tag": "text",
     "asset": {
         "monitored_events": "long",
         "monitored_vulns": "long",
