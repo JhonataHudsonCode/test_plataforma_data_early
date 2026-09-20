@@ -172,6 +172,18 @@
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50
     },
+    "assessment_data.current_assessment_score": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "assessment_data.estimate_new_score_by_assessment": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
+    "assessment_data.impact": {
+      "maximum_increase_percentage": 50,
+      "maximum_decrease_percentage": 50
+    },
     "threat_intelligence_data.current_threat_intelligence_score": {
       "maximum_increase_percentage": 50,
       "maximum_decrease_percentage": 50

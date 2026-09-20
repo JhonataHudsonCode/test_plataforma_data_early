@@ -1,4 +1,9 @@
 {
+  "value_fields": {
+    "current_assessment_score": "float",
+    "estimate_new_score_by_assessment": "float",
+    "impact": "float"
+  },
   "object_name": "improvement",
   "fields": {
     "high_findings": "float"

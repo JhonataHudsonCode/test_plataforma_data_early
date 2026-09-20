@@ -51,13 +51,26 @@ class OtoAssessmentDataValidator(OtoDashboardSectionValidator):
             return
 
         try:
-            object_name, fields, variation_control_prefix = self._load_controls()
+            value_fields, object_name, improvement_fields, variation_control_prefix = (
+                self._load_controls()
+            )
         except (OSError, ValueError, json.JSONDecodeError) as error:
             errors.append(
                 f"Índice '{index_name}' | erro ao carregar controles de assessment_data: "
                 f"{error.__class__.__name__}: {error}"
             )
             return
+
+        self._validate_fields(
+            index_name,
+            latest_assessment_data,
+            previous_assessment_data,
+            value_fields,
+            "assessment_data.",
+            "assessment_data.",
+            errors,
+            details,
+        )
 
         latest_improvement = latest_assessment_data.get(object_name)
         previous_improvement = previous_assessment_data.get(object_name)
@@ -74,10 +87,32 @@ class OtoAssessmentDataValidator(OtoDashboardSectionValidator):
             )
             return
 
+        self._validate_fields(
+            index_name,
+            latest_improvement,
+            previous_improvement,
+            improvement_fields,
+            f"assessment_data.{object_name}.",
+            variation_control_prefix,
+            errors,
+            details,
+        )
+
+    def _validate_fields(
+        self,
+        index_name: str,
+        latest_values: dict[str, Any],
+        previous_values: dict[str, Any],
+        fields: dict[str, str],
+        attribute_prefix: str,
+        variation_control_prefix: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
         for field_name, expected_type in fields.items():
-            attribute_path = f"assessment_data.{object_name}.{field_name}"
-            latest_value = latest_improvement.get(field_name)
-            previous_value = previous_improvement.get(field_name)
+            attribute_path = f"{attribute_prefix}{field_name}"
+            latest_value = latest_values.get(field_name)
+            previous_value = previous_values.get(field_name)
             if not self._is_float(latest_value):
                 errors.append(
                     f"Índice '{index_name}' | atributo **{attribute_path}** deve ser "
@@ -93,6 +128,7 @@ class OtoAssessmentDataValidator(OtoDashboardSectionValidator):
 
             self._validate_variation(
                 index_name,
+                attribute_prefix.rstrip("."),
                 attribute_path,
                 latest_value,
                 previous_value,
@@ -104,6 +140,7 @@ class OtoAssessmentDataValidator(OtoDashboardSectionValidator):
     def _validate_variation(
         self,
         index_name: str,
+        section_path: str,
         attribute_path: str,
         latest_value: float,
         previous_value: float,
@@ -133,7 +170,7 @@ class OtoAssessmentDataValidator(OtoDashboardSectionValidator):
         )
         variation = "não calculável" if result.variation is None else f"{result.variation:.0%}"
         message = (
-            f"Índice '{index_name}' | seção **assessment_data.improvement** | atributo "
+            f"Índice '{index_name}' | seção **{section_path}** | atributo "
             f"**{attribute_path}**: anterior={previous_value}, mais recente={latest_value}, "
             f"variação={variation}; limites: +{limits.maximum_increase:.0%}/"
             f"-{limits.maximum_decrease:.0%}."
@@ -142,27 +179,34 @@ class OtoAssessmentDataValidator(OtoDashboardSectionValidator):
         if not result.is_valid:
             errors.append(f"{message} Erro: {result.reason}.")
 
-    def _load_controls(self) -> tuple[str, dict[str, str], str]:
+    def _load_controls(self) -> tuple[dict[str, str], str, dict[str, str], str]:
         controls: dict[str, Any] = json.loads(
             self._configuration_path.read_text(encoding="utf-8")
         )
+        value_fields = controls.get("value_fields")
         object_name = controls.get("object_name")
-        fields = controls.get("fields")
+        improvement_fields = controls.get("fields")
         variation_control_prefix = controls.get("variation_control_prefix")
         if (
-            not isinstance(object_name, str)
-            or not isinstance(fields, dict)
-            or not fields
+            not isinstance(value_fields, dict)
+            or not value_fields
+            or not isinstance(object_name, str)
+            or not isinstance(improvement_fields, dict)
+            or not improvement_fields
             or not all(
                 isinstance(field_name, str) and expected_type == "float"
-                for field_name, expected_type in fields.items()
+                for field_name, expected_type in value_fields.items()
+            )
+            or not all(
+                isinstance(field_name, str) and expected_type == "float"
+                for field_name, expected_type in improvement_fields.items()
             )
             or not isinstance(variation_control_prefix, str)
         ):
             raise ValueError(
                 "Os controles devem informar object_name, fields e variation_control_prefix válidos."
             )
-        return object_name, fields, variation_control_prefix
+        return value_fields, object_name, improvement_fields, variation_control_prefix
 
     @staticmethod
     def _is_float(value: object) -> bool:
