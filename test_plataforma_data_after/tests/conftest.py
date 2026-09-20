@@ -63,6 +63,7 @@ def _send_report_email(
         )
         return send_email(subject, body)
 
+    print("Enviando relatório com corpo HTML e estilos inline.")
     return send_email(
         subject,
         body,

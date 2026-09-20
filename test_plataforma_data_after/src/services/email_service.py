@@ -3,6 +3,7 @@ import smtplib
 import mimetypes
 from html import escape
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +21,11 @@ class EmailService:
         self.smtp_username = os.getenv("SMTP_USERNAME")
         self.smtp_password = os.getenv("SMTP_PASSWORD")
         self.smtp_from = os.getenv("SMTP_FROM")
-        self.smtp_recipents = os.getenv("SMTP_RECIPIENTS", "").split(",")
+        self.smtp_recipents = [
+            recipient.strip()
+            for recipient in os.getenv("SMTP_RECIPIENTS", "").split(",")
+            if recipient.strip()
+        ]
 
         if not self.smtp_server:
             raise ValueError("SMTP_SERVER environment variable is not set.")
@@ -45,7 +50,7 @@ class EmailService:
     ) -> bool:
 
         msg = EmailMessage()
-        msg["To"] = self.smtp_recipents
+        msg["To"] = ", ".join(self.smtp_recipents)
         msg["From"] = self.smtp_from
         msg["Subject"] = os.getenv(
             "AWS_MAIL_SUBJECT",
@@ -106,11 +111,14 @@ class EmailService:
 
         msg = EmailMessage()
 
-        msg["To"] = self.smtp_recipents
+        msg["To"] = ", ".join(self.smtp_recipents)
         msg["From"] = self.smtp_from
         msg["Subject"] = subject
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid()
+        msg["Reply-To"] = self.smtp_from
 
-        msg.set_content(body)
+        msg.set_content(body, subtype="plain", charset="utf-8")
         msg.add_alternative(
             html_body or (
                 "<pre style='white-space:pre-wrap;font-family:monospace;'>"
