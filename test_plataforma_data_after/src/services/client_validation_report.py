@@ -51,6 +51,54 @@ class ClientValidationReport:
         output_path.write_text(report + "\n", encoding="utf-8")
         return report
 
+    @classmethod
+    def write_combined(
+        cls,
+        report_paths: list[Path],
+        output_path: str | Path,
+    ) -> str:
+        """Gera um relatório único preservando o resultado de cada teste."""
+        combined_results: dict[str, dict[str, list[str]]] = {}
+        section_fields = {
+            "Falhas": ("failures", "Motivo: "),
+            "Informativos": ("infos", "Informação: "),
+            "Aprovados": ("details", "Detalhe: "),
+        }
+
+        for report_path in report_paths:
+            report_content = report_path.read_text(encoding="utf-8")
+            test_name = next(
+                (
+                    line.removeprefix("Teste: ")
+                    for line in report_content.splitlines()
+                    if line.startswith("Teste:")
+                ),
+                report_path.stem,
+            )
+            for section, clients in cls._parse_sections(report_content).items():
+                field, label = section_fields[section]
+                for client_id, messages in clients:
+                    result_id = f"{test_name} | {client_id}"
+                    result = combined_results.setdefault(
+                        result_id,
+                        {"failures": [], "infos": [], "details": []},
+                    )
+                    result[field].extend(
+                        message.removeprefix(label) for message in messages
+                    )
+
+        combined_report = cls()
+        for result_id, result in combined_results.items():
+            combined_report.add_client_result(result_id, **result)
+
+        content = combined_report.write(
+            output_path,
+            "Resumo geral da execução",
+            "Consolidado dos resultados de todos os testes executados.",
+        )
+        cls.write_html_from_text(Path(output_path), Path(output_path).with_suffix(".html"))
+        return content
+
     def curate(
         self,
         test_name: str,
@@ -74,33 +122,30 @@ class ClientValidationReport:
         ):
             clients = sections[title]
             lines.append(f"{title} ({len(clients)}):")
-            for client_id, messages, details in clients:
+            for client_id, messages in clients:
                 lines.append(f"- Cliente: {client_id}")
                 lines.extend(f"  {label}: {message}" for message in messages)
-                if title != "Aprovados":
-                    lines.extend(f"  Detalhe: {detail}" for detail in details)
             lines.append("")
         return "\n".join(lines).rstrip()
 
-    def _sections(self) -> dict[str, list[tuple[str, list[str], list[str]]]]:
-        sections: dict[str, list[tuple[str, list[str], list[str]]]] = {
+    def _sections(self) -> dict[str, list[tuple[str, list[str]]]]:
+        """Separa falhas, informações e sucessos sem misturar seus conteúdos.
+
+        Um mesmo cliente pode aparecer em mais de uma seção: por exemplo, uma
+        falha em um índice não deve esconder as validações aprovadas dos demais.
+        """
+        sections: dict[str, list[tuple[str, list[str]]]] = {
             "Falhas": [],
             "Informativos": [],
             "Aprovados": [],
         }
         for client_id, result in self._results.items():
             if result["failures"]:
-                sections["Falhas"].append(
-                    (client_id, result["failures"], result["details"])
-                )
-            elif result["infos"]:
-                sections["Informativos"].append(
-                    (client_id, result["infos"], result["details"])
-                )
-            else:
-                sections["Aprovados"].append(
-                    (client_id, result["details"], [])
-                )
+                sections["Falhas"].append((client_id, result["failures"]))
+            if result["infos"]:
+                sections["Informativos"].append((client_id, result["infos"]))
+            if result["details"]:
+                sections["Aprovados"].append((client_id, result["details"]))
         return sections
 
     @staticmethod
@@ -244,7 +289,12 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
     @staticmethod
     def _render_message(message: str) -> str:
         """Escapa a mensagem e converte a notação **texto** em negrito seguro."""
-        return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escape(message))
+        escaped_message = escape(message)
+        return re.sub(
+            r"\*\*(.+?)\*\*",
+            r"<strong>\1</strong>",
+            escaped_message,
+        )
 
     @staticmethod
     def _parse_sections(report: str) -> dict[str, list[tuple[str, list[str]]]]:
