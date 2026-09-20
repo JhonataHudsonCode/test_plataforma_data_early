@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import pkgutil
 from datetime import date
 from pathlib import Path
@@ -49,8 +50,33 @@ class OtoDashboardDocumentValidator:
             if module.name.endswith("_validator") and module.name != "document_validator":
                 importlib.import_module(f"{package_name}.{module.name}")
 
-        validator_classes = sorted(
-            OtoDashboardSectionValidator.__subclasses__(),
+        validator_classes_by_section = {
+            validator_class.section_name: validator_class
+            for validator_class in OtoDashboardSectionValidator.__subclasses__()
+        }
+        validation_order = OtoDashboardDocumentValidator._load_validation_order()
+        configured_classes = [
+            validator_classes_by_section.pop(section_name)
+            for section_name in validation_order
+            if section_name in validator_classes_by_section
+        ]
+        validator_classes = configured_classes + sorted(
+            validator_classes_by_section.values(),
             key=lambda validator_class: validator_class.section_name,
         )
         return tuple(validator_class(reference_date) for validator_class in validator_classes)
+
+    @classmethod
+    def _load_validation_order(cls) -> list[str]:
+        configuration = json.loads(cls._VALIDATION_ORDER_PATH.read_text(encoding="utf-8"))
+        sections = configuration.get("sections")
+        if (
+            not isinstance(sections, list)
+            or not all(isinstance(section, str) for section in sections)
+            or len(sections) != len(set(sections))
+        ):
+            raise ValueError(
+                "validation_order.json deve possuir uma lista de seções únicas em 'sections'."
+            )
+        return sections
+    _VALIDATION_ORDER_PATH = Path(__file__).with_name("validation_order.json")

@@ -1,0 +1,11 @@
+{
+  "sections": [
+    "score_data",
+    "asset_data",
+    "rsa_data",
+    "siem_data",
+    "assessment_data",
+    "threat_intelligence_data",
+    "cis_data"
+  ]
+}
