@@ -9,6 +9,9 @@ from src.config.settings import ClientTarget
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 from src.services.client_validation_report import ClientValidationReport
+from src.validators.after_pipeline.opensearch_aliases_validator import (
+    OpenSearchAliasesValidator,
+)
 from src.validators.after_pipeline.product_data_validator import ProductDataValidator
 
 
@@ -131,3 +134,17 @@ def test_should_validate_oto_dashboard_after_pipeline(
         for target in client_targets
     ]
     _assert_validation(results, inspect.currentframe().f_code.co_name)
+
+
+@allure.title("Validar aliases do OpenSearch")
+@pytest.mark.integration
+@pytest.mark.opensearch
+def test_should_validate_opensearch_aliases_after_pipeline(
+    product_repository: OpenSearchVulnerabilityRepository,
+) -> None:
+    validator = OpenSearchAliasesValidator(product_repository)
+    errors, details = validator.validate()
+    _assert_validation(
+        [("Ambiente OpenSearch", errors, details)],
+        inspect.currentframe().f_code.co_name,
+    )
