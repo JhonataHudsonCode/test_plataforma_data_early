@@ -51,11 +51,23 @@ class AlertsIndexValidator:
                 host, ELASTALERT_STATUS_INDEX_NAME
             )
             failures: list[str] = []
-            if ELASTALERT_STATUS_INDEX_NAME not in {item.name for item in indices}:
+            index = next(
+                (item for item in indices if item.name == ELASTALERT_STATUS_INDEX_NAME),
+                None,
+            )
+            if index is None:
+                return ClientValidationResult(
+                    target.client_id,
+                    failures=[
+                        f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
+                        f"não encontrado no host '{host}'. Índices encontrados: "
+                        f"{', '.join(item.name for item in indices) or 'nenhum'}."
+                    ],
+                )
+            if index.document_count <= 0:
                 failures.append(
                     f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
-                    f"não encontrado no host '{host}'. Índices encontrados: "
-                    f"{', '.join(item.name for item in indices) or 'nenhum'}"
+                    f"não contém documentos no host '{host}'."
                 )
 
             metadata = self._opensearch_repository.get_index_metadata(host, ELASTALERT_STATUS_INDEX_NAME)
