@@ -58,6 +58,24 @@ ClientValidationReport → TXT, HTML, e-mail e Allure
 
 Os cenários BDD ficam em `tests/gherkins/after_pipeline/` e são anexados aos reports automaticamente.
 
+### OTO Dashboard e controle de variação
+
+O teste `test_should_validate_oto_dashboard_after_pipeline` compara o documento mais recente do índice `{cliente}_oto_dashboard*` com o documento do dia anterior. Além do índice, data e mapping, ele valida as seções relevantes do `_source`, como `score_data`, `asset_data`, `rsa_data`, `siem_data`, `assessment_data`, `threat_intelligence_data` e `cis_data`.
+
+`OtoDashboardDocumentValidator` descobre os validadores dessas seções automaticamente e executa-os na ordem definida em:
+
+```text
+src/validators/after_pipeline/oto_dashboard/validation_order.json
+```
+
+Os limites percentuais dos atributos são centralizados em:
+
+```text
+src/validators/after_pipeline/controllers/oto_score_variation_controls.json
+```
+
+O `OtoScoreVariationController` lê esse arquivo e aplica, por atributo, os campos `maximum_increase_percentage` e `maximum_decrease_percentage`. Para ajustar uma regra, altere apenas o atributo correspondente no JSON; o controlador calcula a diferença entre valor mais recente e anterior e registra o resultado no report. Valores anteriores iguais a zero são tratados como caso especial, pois não permitem cálculo percentual seguro.
+
 ## 5. Regras de validação
 
 Conforme o cenário, o projeto valida:
