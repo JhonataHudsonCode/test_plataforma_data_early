@@ -11,7 +11,7 @@ from src.services.client_validation_report import ClientValidationReport
 
 
 @allure.suite("Integração Wazuh")
-@allure.title("Validar comunicação e autenticação da API Wazuh na porta 55000")
+@allure.title("Validar comunicação e autenticação dos endpoints da API Wazuh")
 @pytest.mark.integration
 @pytest.mark.wazuh
 def test_should_authenticate_wazuh_clients(
@@ -33,7 +33,7 @@ def test_should_authenticate_wazuh_clients(
             try:
                 connection.authenticate(endpoint)
                 details.append(
-                    f"Wazuh '{credentials.name}' | endpoint {endpoint_name} autenticado na porta 55000."
+                    f"Wazuh '{credentials.name}' | endpoint {endpoint_name} autenticado com sucesso."
                 )
             except WazuhAuthenticationError as error:
                 failures.append(

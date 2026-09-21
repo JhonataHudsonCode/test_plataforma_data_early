@@ -16,7 +16,6 @@ class WazuhAuthenticationError(RuntimeError):
 class WazuhConnection:
     """Cliente mínimo para validar comunicação e autenticação na API Wazuh."""
 
-    _API_PORT = 55000
     _AUTHENTICATION_PATH = "/security/user/authenticate?raw=true"
 
     def __init__(self, credentials: WazuhCredentials, timeout: int = 20) -> None:
@@ -70,4 +69,5 @@ class WazuhConnection:
         host = parsed.hostname
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
-        return f"{parsed.scheme or 'https'}://{host}:{cls._API_PORT}{cls._AUTHENTICATION_PATH}"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        return f"{parsed.scheme or 'https'}://{host}{port}{cls._AUTHENTICATION_PATH}"

@@ -77,7 +77,7 @@ Mensagens de erro devem ser incluídas em `failures`. Validações aprovadas dev
 
 ## 6. Configuração e execução
 
-Crie `.env` a partir de `.env.example` e configure PostgreSQL, OpenSearch, SMTP e ambiente.
+Crie `.env` a partir de `.env.example` e configure PostgreSQL, OpenSearch, SMTP e ambiente. Para configurações por ambiente, use `.env.hml` ou `.env.prod`.
 
 ```bash
 make install
@@ -100,10 +100,10 @@ Com essa opção, `OCTOPUS_CLIENT_CREDENTIALS` define os clientes e endpoints. A
 O teste da API Wazuh usa uma configuração independente, sem consultar os alvos do Octopus:
 
 ```bash
-WAZUH_CREDENTIALS='{"clavis":{"endpoint":"https://wazuh.externo","internal_endpoint":"https://wazuh.interno","username":"$WAZUH_CLAVIS_USER","password":"$WAZUH_CLAVIS_PASSWORD"}}'
+WAZUH_CREDENTIALS='{"clavis":{"endpoint":"https://wazuh.externo","internal_endpoint":"https://wazuh.interno:55000","username":"$WAZUH_CLAVIS_USER","password":"$WAZUH_CLAVIS_PASSWORD"}}'
 ```
 
-Os dois endpoints são acessados na porta `55000` e apenas a comunicação e autenticação são validadas.
+O endpoint externo usa sua porta configurada; o `internal_endpoint` deve informar a porta `55000`. Apenas comunicação e autenticação são validadas.
 
 ## 7. Reports e e-mail
 

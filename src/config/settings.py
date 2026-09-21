@@ -4,13 +4,21 @@ import os
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 
-load_dotenv(f".env_{os.getenv('TEST_ENV', 'hml')}", override=False)
-load_dotenv(override=False)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TEST_ENV = os.getenv("TEST_ENV", "hml")
+
+# Usa caminhos absolutos para que o VS Code Debugger não dependa do cwd atual.
+# O padrão do projeto é .env.hml/.env.prod; o formato legado com _ é mantido
+# apenas para não interromper ambientes que ainda o utilizam.
+load_dotenv(PROJECT_ROOT / f".env.{TEST_ENV}", override=False)
+load_dotenv(PROJECT_ROOT / f".env_{TEST_ENV}", override=False)
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
 def _env(key: str) -> str:
