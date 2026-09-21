@@ -48,7 +48,7 @@ def _save_client_report(
 @pytest.mark.client_data
 @pytest.mark.postgres
 @pytest.mark.opensearch
-@allure.title("Validar dados de superfície de ataque")
+@allure.title("Validar índice rsa no OpenSearch do cliente")
 def test_should_validate_has_rsa_opensearch_client(
     db_client_repository: DataBaseRepository,
     client_repository: OpenSearchClientRepository,
@@ -70,7 +70,7 @@ def test_should_validate_has_rsa_opensearch_client(
     _save_client_report(report, test_name)
     report.assert_no_failures()
 
-@allure.title("Validar dados de alertas")
+@allure.title("Validar índice elastalert_status no OpenSearch do cliente")
 def test_should_validate_has_alerts_opensearch_client(
     db_client_repository: DataBaseRepository,
     client_repository: OpenSearchClientRepository,
@@ -91,7 +91,7 @@ def test_should_validate_has_alerts_opensearch_client(
     _save_client_report(report, test_name)
     report.assert_no_failures()
 
-@allure.title("Validar dados de regras")
+@allure.title("Validar índice rules no OpenSearch do cliente")
 def test_should_validate_rules_opensearch_client(
     db_client_repository: DataBaseRepository,
     client_repository: OpenSearchClientRepository,
@@ -114,7 +114,7 @@ def test_should_validate_rules_opensearch_client(
     _save_client_report(report, test_name)
     report.assert_no_failures()
 
-@allure.title("Validar dados de vulnerabilidades para todos os clientes")
+@allure.title("Validar índices vulnerability-was, vulnerability-vm e vulnerability-vm-new")
 def test_should_validate_vulnerability_opensearch_product(
     db_client_repository: DataBaseRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -142,7 +142,7 @@ def test_should_validate_vulnerability_opensearch_product(
     return
 
 
-@allure.title("Validar dados de EPSS")
+@allure.title("Validar índice de produto epss")
 def test_should_validate_epss_opensearch_product(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets,
@@ -164,7 +164,7 @@ def test_should_validate_epss_opensearch_product(
     return
 
 
-@allure.title("Validar dados históricos de vulnerabilidades")
+@allure.title("Validar índice {cliente}_vulnerability-historical")
 def test_should_validate_asset_vulnerability_historical_opensearch_product(
     db_client_repository: DataBaseRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -186,7 +186,7 @@ def test_should_validate_asset_vulnerability_historical_opensearch_product(
     return
 
 #DUVIDA: todos os documentos devem estar com o status ativo? atualmente o metodo
-@allure.title("Validar dados de tendências de CVE")
+@allure.title("Validar índice de produto cve_trends")
 def test_should_validate_cve_trends_opensearch_product(
     product_repository: OpenSearchVulnerabilityRepository,
 ) -> None:
@@ -201,7 +201,7 @@ def test_should_validate_cve_trends_opensearch_product(
 
 
 #Qual o prazo para validação do índice AXUR? Hoje ou algum outro prazo?
-@allure.title("Validar dados do Axur")
+@allure.title("Validar índice axur no OpenSearch do cliente")
 def test_should_validate_axur_opensearch_client(
     db_client_repository: DataBaseRepository,
     client_repository: OpenSearchClientRepository,
@@ -218,7 +218,7 @@ def test_should_validate_axur_opensearch_client(
     report.assert_no_failures()
     return
 
-@allure.title("Validar chaves de ativação")
+@allure.title("Validar activation_keys na base clients")
 def test_should_validate_activation_keys(
     db_client_repository: DataBaseRepository,
     assets_client_repository: DataBaseRepository,
@@ -235,7 +235,7 @@ def test_should_validate_activation_keys(
     return
 
 
-@allure.title("Validar chaves do Wazuh")
+@allure.title("Validar chave Wazuh em activation_keys")
 def test_should_validate_wazuh_keys(
     db_client_repository: DataBaseRepository,
     assets_client_repository: DataBaseRepository,
@@ -252,7 +252,7 @@ def test_should_validate_wazuh_keys(
     return
 
 
-@allure.title("Validar clientes e clientes de alertas")
+@allure.title("Validar registros clients e alertClients")
 def test_should_validate_clients_alert_clients(
     db_client_repository: DataBaseRepository,
     clients_db_repository: DataBaseRepository,

@@ -53,6 +53,7 @@ def _assert_validation(
 
 @allure.title("Validar {cliente}_asset*, asset-historical-observability e asset-historical-software")
 @pytest.mark.integration
+@pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
 def test_should_validate_assets_and_inventory_variation_after_pipeline(
@@ -70,6 +71,7 @@ def test_should_validate_assets_and_inventory_variation_after_pipeline(
 
 @allure.title("Validar {cliente}_asset-compliance e asset-policy-compliance")
 @pytest.mark.integration
+@pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
 def test_should_validate_compliance_after_pipeline(
@@ -87,6 +89,7 @@ def test_should_validate_compliance_after_pipeline(
 
 @allure.title("Validar {cliente}_authorized-software e mandatory-software")
 @pytest.mark.integration
+@pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
 def test_should_validate_software_policies_after_pipeline(
@@ -104,6 +107,7 @@ def test_should_validate_software_policies_after_pipeline(
 
 @allure.title("Validar índice {cliente}_score_history")
 @pytest.mark.integration
+@pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
 def test_should_validate_score_history_after_pipeline(
@@ -121,6 +125,7 @@ def test_should_validate_score_history_after_pipeline(
 
 @allure.title("Validar índice {cliente}_oto_dashboard*")
 @pytest.mark.integration
+@pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
 def test_should_validate_oto_dashboard_after_pipeline(
@@ -138,6 +143,7 @@ def test_should_validate_oto_dashboard_after_pipeline(
 
 @allure.title("Validar aliases e índices de destino do OpenSearch")
 @pytest.mark.integration
+@pytest.mark.after_pipeline
 @pytest.mark.opensearch
 def test_should_validate_opensearch_aliases_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,

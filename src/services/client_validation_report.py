@@ -64,21 +64,7 @@ class ClientValidationReport:
         environment: str | None = None,
     ) -> str:
         environment = environment or os.getenv("TEST_ENV", "hml").strip().lower()
-        failed = [
-            client
-            for client, result in self._results.items()
-            if result["failures"]
-        ]
-        infos = [
-            client
-            for client, result in self._results.items()
-            if result["infos"] and not result["failures"]
-        ]
-        passed = [
-            client
-            for client, result in self._results.items()
-            if not result["failures"] and not result["infos"]
-        ]
+        sections = self._sections()
         lines = [
             f"Teste: {test_name}",
             f"Ambiente: {environment}",
@@ -87,36 +73,34 @@ class ClientValidationReport:
             bdd,
             "",
         ]
-        lines.extend([f"Falhas ({len(failed)}):"])
-        for client in failed:
-            lines.append(f"- Cliente: {client}")
-            lines.extend(
-                f"  Motivo: {failure}"
-                for failure in self._results[client]["failures"]
-            )
-            lines.extend(
-                f"  Detalhe: {detail}"
-                for detail in self._results[client]["details"]
-            )
-        lines.extend(["", f"Informativos ({len(infos)}):"])
-        for client in infos:
-            lines.append(f"- Cliente: {client}")
-            lines.extend(
-                f"  Informação: {info}"
-                for info in self._results[client]["infos"]
-            )
-            lines.extend(
-                f"  Detalhe: {detail}"
-                for detail in self._results[client]["details"]
-            )
-        lines.extend(["", f"Aprovados ({len(passed)}):"])
-        for client in passed:
-            lines.append(f"- Cliente: {client}")
-            lines.extend(
-                f"  Detalhe: {detail}"
-                for detail in self._results[client]["details"]
-            )
-        return "\n".join(lines)
+        for section, label in (
+            ("Falhas", "Motivo"),
+            ("Informativos", "Informação"),
+            ("Aprovados", "Detalhe"),
+        ):
+            clients = sections[section]
+            lines.append(f"{section} ({len(clients)}):")
+            for client_id, messages in clients:
+                lines.append(f"- Cliente: {client_id}")
+                lines.extend(f"  {label}: {message}" for message in messages)
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
+    def _sections(self) -> dict[str, list[tuple[str, list[str]]]]:
+        """Mantém falhas, informações e validações aprovadas em seções distintas."""
+        sections: dict[str, list[tuple[str, list[str]]]] = {
+            "Falhas": [],
+            "Informativos": [],
+            "Aprovados": [],
+        }
+        for client_id, result in self._results.items():
+            if result["failures"]:
+                sections["Falhas"].append((client_id, result["failures"]))
+            if result["infos"]:
+                sections["Informativos"].append((client_id, result["infos"]))
+            if result["details"]:
+                sections["Aprovados"].append((client_id, result["details"]))
+        return sections
 
     def write(
         self,
@@ -130,6 +114,53 @@ class ClientValidationReport:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(report + "\n", encoding="utf-8")
         return report
+
+    @classmethod
+    def write_combined(
+        cls,
+        report_paths: list[Path],
+        output_path: str | Path,
+    ) -> str:
+        """Consolida os relatórios individuais em um único relatório da execução."""
+        combined_results: dict[str, dict[str, list[str]]] = {}
+        section_fields = {
+            "Falhas": ("failures", "Motivo: "),
+            "Informativos": ("infos", "Informação: "),
+            "Aprovados": ("details", "Detalhe: "),
+        }
+        for report_path in report_paths:
+            report_content = report_path.read_text(encoding="utf-8")
+            test_name = next(
+                (
+                    line.removeprefix("Teste: ")
+                    for line in report_content.splitlines()
+                    if line.startswith("Teste:")
+                ),
+                report_path.stem,
+            )
+            for section, clients in cls._parse_sections(report_content).items():
+                field, label = section_fields[section]
+                for client_id, messages in clients:
+                    result_id = f"{test_name} | {client_id}"
+                    result = combined_results.setdefault(
+                        result_id,
+                        {"failures": [], "infos": [], "details": []},
+                    )
+                    result[field].extend(
+                        message.removeprefix(label) for message in messages
+                    )
+
+        report = cls()
+        for result_id, result in combined_results.items():
+            report.add_client_result(result_id, **result)
+        content = report.write(
+            output_path,
+            "Resumo geral da execução",
+            "Consolidado dos resultados de todos os testes executados.",
+        )
+        report.close()
+        cls.write_html_from_text(Path(output_path), Path(output_path).with_suffix(".html"))
+        return content
 
     @staticmethod
     def allure_title_from_source(source_path: str | Path, function_name: str) -> str:
@@ -162,6 +193,27 @@ class ClientValidationReport:
             return "BDD não encontrado."
         feature_path = feature_paths[0]
         return feature_path.read_text(encoding="utf-8").strip()
+
+    @staticmethod
+    def _parse_sections(report: str) -> dict[str, list[tuple[str, list[str]]]]:
+        sections: dict[str, list[tuple[str, list[str]]]] = {
+            "Falhas": [],
+            "Informativos": [],
+            "Aprovados": [],
+        }
+        current: str | None = None
+        for line in report.splitlines():
+            if line.startswith("Falhas ("):
+                current = "Falhas"
+            elif line.startswith("Informativos ("):
+                current = "Informativos"
+            elif line.startswith("Aprovados ("):
+                current = "Aprovados"
+            elif current and line.startswith("- Cliente: "):
+                sections[current].append((line.removeprefix("- Cliente: "), []))
+            elif current and sections[current] and line.startswith("  "):
+                sections[current][-1][1].append(line.strip())
+        return sections
 
     @staticmethod
     def write_html_from_text(

@@ -68,7 +68,18 @@ def pytest_sessionfinish(session, exitstatus):
     Executado quando toda a sessão de testes termina. Aqui, podemos realizar ações de limpeza ou relatórios finais.
     """
 
-    report_paths = sorted(Path("reports/client-validation").glob("*.txt"))
+    general_report_name = "relatorio_geral.txt"
+    report_paths = sorted(
+        path
+        for path in Path("reports/client-validation").glob("*.txt")
+        if path.name != general_report_name
+    )
+    if report_paths:
+        ClientValidationReport.write_combined(
+            report_paths,
+            Path("reports/client-validation") / general_report_name,
+        )
+
     failed_reports: list[tuple[Path, str]] = []
     for report_path in report_paths:
         body = report_path.read_text(encoding="utf-8")
