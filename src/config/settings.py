@@ -94,6 +94,17 @@ class ClientOpenSearchCredentials:
 
 
 @dataclass(frozen=True, slots=True)
+class WazuhCredentials:
+    """Credenciais de acesso à API Wazuh de um ambiente de cliente."""
+
+    name: str
+    endpoint: str
+    internal_endpoint: str
+    username: str
+    password: str
+
+
+@dataclass(frozen=True, slots=True)
 class ClientTarget:
     client_id: str
     activation_key_name: str | None = None
@@ -150,6 +161,39 @@ def client_credentials_from_env() -> list[ClientOpenSearchCredentials]:
                     str(value.get("password", "")),
                     "OPENSEARCH_PASSWORD",
                 ),
+            )
+        )
+    return credentials
+
+
+def wazuh_credentials_from_env() -> list[WazuhCredentials]:
+    """Carrega as credenciais Wazuh sem reutilizar os alvos do Octopus."""
+    raw = os.getenv("WAZUH_CREDENTIALS", "{}")
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("WAZUH_CREDENTIALS deve ser um JSON válido.") from error
+
+    if not isinstance(values, dict):
+        raise ValueError("WAZUH_CREDENTIALS deve ser um objeto JSON.")
+
+    credentials: list[WazuhCredentials] = []
+    for name, value in values.items():
+        if not isinstance(value, dict):
+            raise ValueError(f"Credenciais Wazuh inválidas para {name}.")
+        endpoint = str(value.get("endpoint", "")).strip()
+        internal_endpoint = str(value.get("internal_endpoint", "")).strip()
+        if not endpoint or not internal_endpoint:
+            raise ValueError(
+                f"Endpoints externo e interno são obrigatórios para o Wazuh {name}."
+            )
+        credentials.append(
+            WazuhCredentials(
+                name=name,
+                endpoint=endpoint,
+                internal_endpoint=internal_endpoint,
+                username=_resolve_secret(str(value.get("username", "")), "WAZUH_USERNAME"),
+                password=_resolve_secret(str(value.get("password", "")), "WAZUH_PASSWORD"),
             )
         )
     return credentials

@@ -15,8 +15,10 @@ from src.config.settings import (
     ClientTarget,
     OpenSearchSettings,
     PostgresSettings,
+    WazuhCredentials,
     client_selection_source,
     client_credentials_from_env,
+    wazuh_credentials_from_env,
 )
 from src.connections.opensearch import OpenSearchConnection
 from src.connections.opensearch_factory import OpenSearchConnectionFactory
@@ -248,6 +250,11 @@ def client_repository(
 @pytest.fixture(scope="session")
 def client_credentials() -> list[ClientOpenSearchCredentials]:
     return client_credentials_from_env()
+
+
+@pytest.fixture(scope="session")
+def wazuh_credentials() -> list[WazuhCredentials]:
+    return wazuh_credentials_from_env()
 
 
 @pytest.fixture(scope="session")

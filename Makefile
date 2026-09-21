@@ -1,4 +1,4 @@
-.PHONY: install test test-hml test-prod test-credentials test-hml-credentials test-prod-credentials test-postgres report open-report serve-report up down clean
+.PHONY: install test test-hml test-prod test-credentials test-hml-credentials test-prod-credentials test-wazuh test-postgres report open-report serve-report up down clean
 
 PYTHON ?= python
 
@@ -23,6 +23,9 @@ test-hml-credentials:
 
 test-prod-credentials:
 	TEST_ENV=prod CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest
+
+test-wazuh:
+	$(PYTHON) -m pytest -m wazuh
 
 test-postgres:
 	$(PYTHON) -m pytest -m postgres

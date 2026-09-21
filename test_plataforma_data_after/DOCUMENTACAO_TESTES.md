@@ -37,6 +37,14 @@ ClientValidationReport → TXT, HTML, e-mail e Allure
 - `src/models/opensearch_product/`: contratos de mapping.
 - `src/services/`: reports e e-mail.
 
+### Arquivos de configuração da execução
+
+| Arquivo | Função |
+| --- | --- |
+| `src/config/settings.py` | Lê e valida variáveis de ambiente para OpenSearch, Cognito, SMTP, ambiente e seleção de clientes. Também fornece os objetos de configuração usados pelas fixtures. |
+| `tests/conftest.py` | Centraliza fixtures do Pytest para conexões e repositories. Cria e consolida os reports ao fim da sessão e envia e-mail quando há falhas. |
+| `pytest.ini` | Define descoberta dos testes, marcadores como `after_pipeline`, `integration` e `opensearch`, além das opções padrão do Pytest e do Allure. |
+
 ## 4. Catálogo de testes
 
 | Teste | Principal validação |
@@ -106,4 +114,3 @@ O e-mail só é enviado se houver falhas ou se o pytest terminar com erro sem re
 4. Para uma nova seção do OTO Dashboard, crie um validator para o objeto pai e registre a ordem em `validation_order.json`.
 5. Atualize o BDD com o mesmo nome da função de teste.
 6. Separe `errors`, `infos` e `details` para que o report reflita o resultado corretamente.
-

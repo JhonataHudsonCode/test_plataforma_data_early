@@ -35,6 +35,14 @@ ClientValidationReport → TXT, HTML, e-mail e Allure
 - `src/queries/`: SQLs centralizados.
 - `src/services/`: reports e envio de e-mail.
 
+### Arquivos de configuração da execução
+
+| Arquivo | Função |
+| --- | --- |
+| `src/config/settings.py` | Lê e valida variáveis de ambiente, incluindo conexões, ambiente selecionado e clientes por credencial. Também expõe os objetos de configuração usados pelas fixtures. |
+| `tests/conftest.py` | Centraliza fixtures do Pytest para conexões e repositories. Inicia a pasta de reports, consolida os resultados ao fim da sessão e controla o envio de e-mail em caso de falha. |
+| `pytest.ini` | Define descoberta dos testes, marcadores (`integration`, `postgres`, `opensearch` e outros) e opções padrão do Pytest, como a geração de resultados do Allure. |
+
 ## 4. Catálogo de testes
 
 | Teste | Principal validação |
@@ -47,6 +55,7 @@ ClientValidationReport → TXT, HTML, e-mail e Allure
 | Histórico | `{cliente}_vulnerability-historical`, documentos recentes e mapping |
 | CVE trends | Índice global `cve_trends` e mapping |
 | Axur | Flag `has_axur`, índice `axur` e mapping |
+| Wazuh API | Comunicação e autenticação dos endpoints externo e interno na porta `55000` |
 | Chaves | Chaves de ativação e chave Wazuh no database `clients` |
 | Clientes | Registros e datas nas tabelas `clients` e `alertClients` |
 
@@ -77,6 +86,7 @@ make test-hml
 make test-prod
 make test-credentials
 make test-client-data
+make test-wazuh
 ```
 
 Para selecionar clientes pelos endpoints configurados, use:
@@ -86,6 +96,14 @@ CLIENT_SELECTION_SOURCE=credentials
 ```
 
 Com essa opção, `OCTOPUS_CLIENT_CREDENTIALS` define os clientes e endpoints. As flags continuam sendo consultadas no Cognito.
+
+O teste da API Wazuh usa uma configuração independente, sem consultar os alvos do Octopus:
+
+```bash
+WAZUH_CREDENTIALS='{"clavis":{"endpoint":"https://wazuh.externo","internal_endpoint":"https://wazuh.interno","username":"$WAZUH_CLAVIS_USER","password":"$WAZUH_CLAVIS_PASSWORD"}}'
+```
+
+Os dois endpoints são acessados na porta `55000` e apenas a comunicação e autenticação são validadas.
 
 ## 7. Reports e e-mail
 
@@ -115,4 +133,3 @@ O e-mail é enviado apenas quando existe falha em um report ou quando a execuç�
 4. Adicione ou ajuste o cenário BDD com o mesmo nome da função de teste.
 5. Registre falhas em `failures` e sucessos em `details`.
 6. Execute o teste isolado antes de incluí-lo na execução completa.
-
