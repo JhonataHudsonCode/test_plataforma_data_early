@@ -76,7 +76,11 @@ class RsaIndexValidator:
             )
             if not has_mapping:
                 failures.append(f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' não possui mapping configurado. Host: '{host}'.")
-            failures.extend(mapping_errors)
+            failures.extend(
+                f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' | "
+                f"host '{host}' | mapping inválido: {error}"
+                for error in mapping_errors
+            )
             return ClientValidationResult(target.client_id, failures=failures, details=details)
         except Exception as error:
             return ClientValidationResult(
