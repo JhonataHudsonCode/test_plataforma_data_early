@@ -67,17 +67,39 @@ class RsaIndexValidator:
                     ],
                 )
 
-            failures, details = OpenSearchClientValidationHelper.validate_latest_document(
-                self._opensearch_repository, target.client_id, host, RSA_INDEX_NAME,
-                self._reference_date,
+            latest_document = OpenSearchClientValidationHelper.get_latest_document(
+                self._opensearch_repository,
+                host,
+                RSA_INDEX_NAME,
             )
+            infos, details = OpenSearchClientValidationHelper.validate_document_data(
+                target.client_id,
+                RSA_INDEX_NAME,
+                latest_document,
+                EXPECTED_RSA_MAPPING,
+                excluded_fields={"@timestamp"},
+            )
+            failures, timestamp_details = OpenSearchClientValidationHelper.validate_latest_document(
+                self._opensearch_repository,
+                target.client_id,
+                host,
+                RSA_INDEX_NAME,
+                self._reference_date,
+                document=latest_document,
+            )
+            details.extend(timestamp_details)
             has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
                 self._opensearch_repository, host, RSA_INDEX_NAME, EXPECTED_RSA_MAPPING
             )
             if not has_mapping:
                 failures.append(f"Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' não possui mapping configurado. Host: '{host}'.")
             failures.extend(mapping_errors)
-            return ClientValidationResult(target.client_id, failures=failures, details=details)
+            return ClientValidationResult(
+                target.client_id,
+                failures=failures,
+                infos=infos,
+                details=details,
+            )
         except Exception as error:
             return ClientValidationResult(
                 target.client_id,
