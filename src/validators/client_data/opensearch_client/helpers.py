@@ -48,16 +48,15 @@ class OpenSearchClientValidationHelper:
 
         source = document.get("_source", {})
         timestamp = str(source.get("@timestamp", ""))
-        details = [f"Última leitura (@timestamp): {timestamp or 'não informado'}."
-        ]
-        logger.info("Cliente %s | índice %s | %s", client_id, index_name, " | ".join(details))
+        detail = f"Última leitura (@timestamp): {timestamp or 'não informado'}."
+        logger.info("Cliente %s | índice %s | %s", client_id, index_name, detail)
         if timestamp.startswith(reference_date.isoformat()):
-            return [], details
+            return [], [detail]
         return [
             f"Cliente '{client_id}' | índice '{index_name}' | o documento mais recente "
             f"possui @timestamp '{timestamp or 'não informado'}', mas era esperada a data "
             f"'{reference_date:%Y-%m-%d}'."
-        ], details
+        ], []
 
     @staticmethod
     def validate_mapping(
