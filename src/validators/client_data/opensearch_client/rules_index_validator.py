@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from src.config.settings import ClientTarget
 from src.models.client_validation_result import ClientValidationResult
 from src.models.opensearch_client.rules_mapping import (
@@ -19,9 +21,11 @@ class RulesIndexValidator:
         self,
         cognito_repository: DataBaseRepository,
         opensearch_repository: OpenSearchClientRepository,
+        reference_date: date,
     ) -> None:
         self._cognito_repository = cognito_repository
         self._opensearch_repository = opensearch_repository
+        self._reference_date = reference_date
 
     def validate(self, target: ClientTarget) -> ClientValidationResult:
         client = self._cognito_repository.get_table(
@@ -64,6 +68,18 @@ class RulesIndexValidator:
                 details.append(
                     f"Índice rules encontrado com {index.document_count} documento(s)."
                 )
+
+            timestamp_failures, timestamp_details = (
+                OpenSearchClientValidationHelper.validate_latest_document(
+                    self._opensearch_repository,
+                    target.client_id,
+                    host,
+                    RULES_INDEX_NAME,
+                    self._reference_date,
+                )
+            )
+            failures.extend(timestamp_failures)
+            details.extend(timestamp_details)
 
             has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
                 self._opensearch_repository, host, RULES_INDEX_NAME, EXPECTED_RULES_MAPPING
