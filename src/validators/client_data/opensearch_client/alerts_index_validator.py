@@ -11,6 +11,9 @@ from src.models.opensearch_client.elastalert_status_mapping import (
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_ALERTS_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
+from src.validators.client_data.opensearch_client.helpers import (
+    OpenSearchClientValidationHelper,
+)
 from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
 
 
@@ -64,19 +67,18 @@ class AlertsIndexValidator:
                         f"{', '.join(item.name for item in indices) or 'nenhum'}."
                     ],
                 )
-            if index.document_count <= 0:
-                failures.append(
-                    f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
-                    f"não contém documentos no host '{host}'."
+            document_failures, details = (
+                OpenSearchClientValidationHelper.validate_latest_document(
+                    self._opensearch_repository,
+                    target.client_id,
+                    host,
+                    ELASTALERT_STATUS_INDEX_NAME,
+                    self._reference_date,
                 )
+            )
+            failures.extend(document_failures)
 
             metadata = self._opensearch_repository.get_index_metadata(host, ELASTALERT_STATUS_INDEX_NAME)
-            if metadata.created_at.date() != self._reference_date:
-                failures.append(
-                    f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
-                    f"com data de criação '{metadata.created_at:%Y-%m-%d}', mas era esperada "
-                    f"a data '{self._reference_date:%Y-%m-%d}'. Host consultado: '{host}'."
-                )
             if not metadata.mapping:
                 failures.append(
                     f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
@@ -91,7 +93,11 @@ class AlertsIndexValidator:
                         EXPECTED_ELASTALERT_STATUS_MAPPING,
                     )
                 )
-            return ClientValidationResult(target.client_id, failures=failures)
+            return ClientValidationResult(
+                target.client_id,
+                failures=failures,
+                details=details,
+            )
         except Exception as error:
             return ClientValidationResult(
                 target.client_id,

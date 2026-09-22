@@ -37,14 +37,12 @@ class OpenSearchClientValidationHelper:
         host: str,
         index_name: str,
         reference_date: date,
-        document: dict[str, Any] | None = None,
     ) -> tuple[list[str], list[str]]:
-        if document is None:
-            document = OpenSearchClientValidationHelper.get_latest_document(
-                repository,
-                host,
-                index_name,
-            )
+        document = OpenSearchClientValidationHelper.get_latest_document(
+            repository,
+            host,
+            index_name,
+        )
         if document is None:
             return [f"Cliente '{client_id}' | índice '{index_name}' | nenhum documento encontrado."], []
 
@@ -60,100 +58,6 @@ class OpenSearchClientValidationHelper:
             f"possui @timestamp '{timestamp or 'não informado'}', mas era esperada a data "
             f"'{reference_date:%Y-%m-%d}'."
         ], details
-
-    @staticmethod
-    def validate_document_data(
-        client_id: str,
-        index_name: str,
-        document: dict[str, Any] | None,
-        expected_mapping: dict[str, Any],
-        excluded_fields: set[str] | None = None,
-    ) -> tuple[list[str], list[str]]:
-        """Registra os dados presentes e ausentes esperados no ``_source``.
-
-        Campos vazios s\u00e3o informativos: o contrato estrutural continua sendo
-        validado pelo mapping, enquanto o relat\u00f3rio deixa expl\u00edcito quais dados
-        chegaram sem valor no documento mais recente.
-        """
-        if document is None:
-            return [], []
-
-        source = document.get("_source")
-        if not isinstance(source, dict):
-            return [
-                f"Cliente '{client_id}' | \u00edndice '{index_name}' | objeto "
-                "**_source** vazio ou n\u00e3o informado."
-            ], []
-
-        infos: list[str] = []
-        details: list[str] = []
-        ignored = excluded_fields or set()
-        OpenSearchClientValidationHelper._collect_document_data(
-            client_id,
-            index_name,
-            source,
-            expected_mapping,
-            infos,
-            details,
-            ignored,
-        )
-        return infos, details
-
-    @staticmethod
-    def _collect_document_data(
-        client_id: str,
-        index_name: str,
-        values: dict[str, Any],
-        expected_fields: dict[str, Any],
-        infos: list[str],
-        details: list[str],
-        excluded_fields: set[str],
-        path: str = "",
-    ) -> None:
-        for field_name, expected_value in expected_fields.items():
-            field_path = f"{path}.{field_name}" if path else field_name
-            if field_path in excluded_fields:
-                continue
-
-            value = values.get(field_name)
-            if OpenSearchClientValidationHelper._is_empty(value):
-                infos.append(
-                    f"Cliente '{client_id}' | \u00edndice '{index_name}' | atributo "
-                    f"**{field_path}** vazio ou n\u00e3o informado."
-                )
-                continue
-
-            if isinstance(expected_value, dict):
-                if not isinstance(value, dict):
-                    infos.append(
-                        f"Cliente '{client_id}' | \u00edndice '{index_name}' | objeto "
-                        f"**{field_path}** possui valor inv\u00e1lido: {value!r}."
-                    )
-                    continue
-                details.append(
-                    f"Cliente '{client_id}' | \u00edndice '{index_name}' | objeto "
-                    f"**{field_path}** preenchido."
-                )
-                OpenSearchClientValidationHelper._collect_document_data(
-                    client_id,
-                    index_name,
-                    value,
-                    expected_value,
-                    infos,
-                    details,
-                    excluded_fields,
-                    field_path,
-                )
-                continue
-
-            details.append(
-                f"Cliente '{client_id}' | \u00edndice '{index_name}' | atributo "
-                f"**{field_path}**: {value!r}."
-            )
-
-    @staticmethod
-    def _is_empty(value: Any) -> bool:
-        return value is None or value == "" or value == [] or value == {}
 
     @staticmethod
     def validate_mapping(
