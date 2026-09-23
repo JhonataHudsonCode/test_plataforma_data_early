@@ -30,29 +30,34 @@ class WazuhKeyValidator:
                 target.client_id,
                 failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."],
             )
-        if len(keys) > 1:
+        duplicate_names = self._duplicate_names(keys)
+        if duplicate_names:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Cliente '{target.client_id}' possui "
-                    f"{len(keys)} registros cadastrados; era esperado apenas 1."
+                    f"Cliente '{target.client_id}' possui mais de uma chave do Wazuh "
+                    f"com o mesmo activation_key_name: {', '.join(duplicate_names)}."
                 ],
             )
 
-        activation_key_id = keys[0].get("activation_key_id")
-        if not self._is_uuid_string(activation_key_id):
+        invalid_ids = [
+            value
+            for key in keys
+            if not self._is_uuid_string(value := key.get("activation_key_id"))
+        ]
+        if invalid_ids:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
                     f"Chave do Wazuh do cliente '{target.client_id}' possui "
-                    f"activation_key_id inválido: {activation_key_id!r}."
+                    f"activation_key_id inválido: {', '.join(repr(value) for value in invalid_ids)}."
                 ],
             )
         return ClientValidationResult(
             target.client_id,
             details=[
-                f"Chave do Wazuh do cliente '{target.client_id}' possui "
-                "activation_key_id preenchido no formato UUID."
+                f"Chave do Wazuh do cliente '{target.client_id}' possui {len(keys)} "
+                "activation_key_id preenchido(s) no formato UUID."
             ],
         )
 
@@ -64,3 +69,12 @@ class WazuhKeyValidator:
             return str(UUID(value)) == value.lower()
         except (AttributeError, TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _duplicate_names(keys: list[dict[str, object]]) -> list[str]:
+        names: dict[str, int] = {}
+        for key in keys:
+            name = str(key.get("activation_key_name") or "não informado").strip()
+            normalized_name = name.casefold()
+            names[normalized_name] = names.get(normalized_name, 0) + 1
+        return [name for name, count in names.items() if count > 1]

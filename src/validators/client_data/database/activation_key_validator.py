@@ -31,6 +31,16 @@ class ActivationKeyValidator:
                 failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."],
             )
 
+        duplicate_names = self._duplicate_names(keys)
+        if duplicate_names:
+            return ClientValidationResult(
+                target.client_id,
+                failures=[
+                    f"Cliente '{target.client_id}' possui mais de uma chave de ativação "
+                    f"com o mesmo activation_key_name: {', '.join(duplicate_names)}."
+                ],
+            )
+
         invalid_ids = [
             value
             for key in keys
@@ -60,3 +70,12 @@ class ActivationKeyValidator:
             return str(UUID(value)) == value.lower()
         except (AttributeError, TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _duplicate_names(keys: list[dict[str, object]]) -> list[str]:
+        names: dict[str, int] = {}
+        for key in keys:
+            name = str(key.get("activation_key_name") or "não informado").strip()
+            normalized_name = name.casefold()
+            names[normalized_name] = names.get(normalized_name, 0) + 1
+        return [name for name, count in names.items() if count > 1]
