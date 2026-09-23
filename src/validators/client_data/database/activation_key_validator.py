@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from src.config.settings import ClientTarget
 from src.models.client_validation_result import ClientValidationResult
-from src.queries.assets_client_queries import SELECT_ASSETS_CLIENT_ACTIVATION_KEYS
+from src.queries.assets_client_queries import SELECT_ASSETS_CLIENT_ACTIVATION_KEY_IDS
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_BART_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 
@@ -18,17 +20,43 @@ class ActivationKeyValidator:
             return ClientValidationResult(target.client_id, failures=[f"Cliente '{target.client_id}' não encontrado no Cognito; consulta de has_bart não retornou registro."])
         if not client.get("has_bart"):
             return ClientValidationResult(target.client_id, infos=[f"Cliente '{target.client_id}' possui has_bart desabilitado; chave de ativação não aplicável."])
-        found = self._assets_repository.has_activation_key(
+        keys = self._assets_repository.get_activation_keys(
             "public",
             target.client_id,
-            SELECT_ASSETS_CLIENT_ACTIVATION_KEYS,
+            SELECT_ASSETS_CLIENT_ACTIVATION_KEY_IDS,
         )
-        if not found:
+        if not keys:
             return ClientValidationResult(
                 target.client_id,
                 failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."],
             )
+
+        invalid_ids = [
+            value
+            for key in keys
+            if not self._is_uuid_string(value := key.get("activation_key_id"))
+        ]
+        if invalid_ids:
+            return ClientValidationResult(
+                target.client_id,
+                failures=[
+                    f"Cliente '{target.client_id}' possui activation_key_id inválido: "
+                    f"{', '.join(repr(value) for value in invalid_ids)}."
+                ],
+            )
         return ClientValidationResult(
             target.client_id,
-            details=[f"Cliente '{target.client_id}' possui chave de ativação cadastrada."],
+            details=[
+                f"Cliente '{target.client_id}' possui {len(keys)} activation_key_id "
+                "preenchido(s) no formato UUID."
+            ],
         )
+
+    @staticmethod
+    def _is_uuid_string(value: object) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            return str(UUID(value)) == value.lower()
+        except (AttributeError, TypeError, ValueError):
+            return False
