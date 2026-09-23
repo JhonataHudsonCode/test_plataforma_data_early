@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from src.config.settings import ClientTarget
 from src.models.client_validation_result import ClientValidationResult
-from src.queries.assets_client_queries import SELECT_ASSETS_CLIENT_ACTIVATION_KEYS
+from src.queries.assets_client_queries import SELECT_ASSETS_CLIENT_ACTIVATION_KEY_IDS
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_WAZUH_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 
@@ -21,7 +23,7 @@ class WazuhKeyValidator:
         keys = self._assets_repository.get_activation_keys(
             "public",
             target.client_id,
-            SELECT_ASSETS_CLIENT_ACTIVATION_KEYS,
+            SELECT_ASSETS_CLIENT_ACTIVATION_KEY_IDS,
         )
         if not keys:
             return ClientValidationResult(
@@ -37,17 +39,28 @@ class WazuhKeyValidator:
                 ],
             )
 
-        required_fields = ("activation_key_id", "client_id")
-        missing_fields = [field for field in required_fields if not keys[0].get(field)]
-        if missing_fields:
+        activation_key_id = keys[0].get("activation_key_id")
+        if not self._is_uuid_string(activation_key_id):
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Chave do Wazuh do cliente '{target.client_id}' possui dados "
-                    f"ausentes na tabela: {', '.join(missing_fields)}."
+                    f"Chave do Wazuh do cliente '{target.client_id}' possui "
+                    f"activation_key_id inválido: {activation_key_id!r}."
                 ],
             )
         return ClientValidationResult(
             target.client_id,
-            details=[f"Chave do Wazuh do cliente '{target.client_id}' encontrada."],
+            details=[
+                f"Chave do Wazuh do cliente '{target.client_id}' possui "
+                "activation_key_id preenchido no formato UUID."
+            ],
         )
+
+    @staticmethod
+    def _is_uuid_string(value: object) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            return str(UUID(value)) == value.lower()
+        except (AttributeError, TypeError, ValueError):
+            return False
