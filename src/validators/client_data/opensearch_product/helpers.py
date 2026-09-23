@@ -32,12 +32,11 @@ class OpenSearchProductValidationHelper:
             return [f"Cliente '{client_id}' | índice '{index_name}' | nenhum documento encontrado."], []
 
         timestamp = str(document.get("_source", {}).get("@timestamp", ""))
-        details = [f"Índice '{index_name}' | última leitura (@timestamp): {timestamp or 'não informado'}."
-        ]
+        detail = f"Índice '{index_name}' | última leitura (@timestamp): {timestamp or 'não informado'}."
         if timestamp.startswith(reference_date.isoformat()):
-            return [], details
+            return [], [detail]
         return [
             f"Cliente '{client_id}' | índice '{index_name}' | o documento mais recente "
             f"possui @timestamp '{timestamp or 'não informado'}', mas era esperada a data "
             f"'{reference_date:%Y-%m-%d}'."
-        ], details
+        ], []
