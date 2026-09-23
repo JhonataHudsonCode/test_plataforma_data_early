@@ -100,12 +100,12 @@ def pytest_sessionfinish(session, exitstatus):
     try:
         email_service = EmailService()
         for report_path, body in failed_reports:
-            email_html = ClientValidationReport.email_html_from_text(report_path)
             subject = f"Relatório de Testes - {report_path.stem}"
             email_sent = email_service.send_email(
                 subject,
                 body,
-                html_body=email_html,
+                html_body=ClientValidationReport.email_summary_html_from_text(report_path),
+                attachment_path=report_path.with_suffix(".html"),
             )
             if email_sent:
                 print(f"Relatório aceito pelo servidor SMTP: {report_path.name}")

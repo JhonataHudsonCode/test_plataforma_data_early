@@ -55,21 +55,23 @@ def _send_report_email(
     body: str,
     report_path: Path,
 ) -> bool:
-    """Envia HTML quando a versão instalada do serviço o suporta."""
+    """Envia um resumo e anexa o HTML completo quando o serviço suporta ambos."""
     send_email = email_service.send_email
-    if "html_body" not in inspect.signature(send_email).parameters:
+    parameters = inspect.signature(send_email).parameters
+    if "html_body" not in parameters:
         print(
             "Aviso: EmailService instalado não suporta html_body; "
             "o relatório será enviado em texto simples."
         )
         return send_email(subject, body)
 
-    print("Enviando relatório com corpo HTML e estilos inline.")
-    return send_email(
-        subject,
-        body,
-        html_body=ClientValidationReport.email_html_from_text(report_path),
-    )
+    kwargs: dict[str, object] = {
+        "html_body": ClientValidationReport.email_summary_html_from_text(report_path),
+    }
+    if "attachment_path" in parameters:
+        kwargs["attachment_path"] = report_path.with_suffix(".html")
+    print("Enviando resumo do relatório e HTML completo como anexo.")
+    return send_email(subject, body, **kwargs)
 
 def pytest_sessionstart(session):
     """

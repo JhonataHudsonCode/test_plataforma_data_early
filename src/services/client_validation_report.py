@@ -380,6 +380,37 @@ class ClientValidationReport:
         return html
 
     @staticmethod
+    def email_summary_html_from_text(report_path: str | Path) -> str:
+        """Gera um resumo compacto para o e-mail; o relatório completo segue anexo."""
+        report = Path(report_path).read_text(encoding="utf-8")
+        lines = report.splitlines()
+        title = next(
+            (line.removeprefix("Teste: ").strip() for line in lines if line.startswith("Teste:")),
+            "Relatório de validação",
+        )
+        environment = next(
+            (line.removeprefix("Ambiente: ").strip() for line in lines if line.startswith("Ambiente:")),
+            "hml",
+        )
+        duration = next(
+            (line.removeprefix("Duração: ").strip() for line in lines if line.startswith("Duração:")),
+            "00:00:00",
+        )
+        sections = ClientValidationReport._parse_sections(report)
+        metrics = "".join(
+            f'<td style="padding:12px;border-top:4px solid {color};background:{background};">'
+            f'<strong>{name}</strong><br><span style="font-size:24px;">{len(sections[name])}</span></td>'
+            for name, color, background in (
+                ("Falhas", "#b42318", "#fff1f0"),
+                ("Informativos", "#9a6700", "#fff8e6"),
+                ("Aprovados", "#16734a", "#edf9f2"),
+            )
+        )
+        return f"""<!doctype html><html lang="pt-BR"><body style="margin:0;padding:24px;background:#eef2f5;font-family:Arial,sans-serif;color:#17202a;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px;margin:auto;background:#ffffff;"><tr><td style="padding:28px 30px;background:#18324a;color:#ffffff;"><h1 style="margin:0 0 10px;font-size:24px;">{escape(title)}</h1><p style="margin:0;color:#d7e2eb;">Ambiente: {escape(environment)} &middot; Duração: {escape(duration)}</p></td></tr><tr><td style="padding:20px 22px;"><p style="margin-top:0;">Resumo da execução. O relatório HTML completo está anexado a este e-mail.</p><table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metrics}</tr></table></td></tr></table>
+</body></html>"""
+
+    @staticmethod
     def email_html_from_text(report_path: str | Path) -> str:
         """Gera HTML compatível com clientes de e-mail a partir do relatório TXT."""
         report = Path(report_path).read_text(encoding="utf-8")

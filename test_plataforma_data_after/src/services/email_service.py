@@ -107,6 +107,7 @@ class EmailService:
         subject: str, 
         body: str,
         html_body: str | None = None,
+        attachment_path: str | Path | None = None,
     ) -> bool:
 
         msg = EmailMessage()
@@ -126,6 +127,22 @@ class EmailService:
             ),
             subtype="html"
         )
+        if attachment_path:
+            attachment = Path(attachment_path)
+            if not attachment.is_absolute():
+                attachment = PROJECT_ROOT / attachment
+            if not attachment.is_file():
+                raise FileNotFoundError(f"Attachment file not found: {attachment}")
+            content_type, _ = mimetypes.guess_type(attachment.name)
+            maintype, subtype = (content_type or "application/octet-stream").split(
+                "/", 1
+            )
+            msg.add_attachment(
+                attachment.read_bytes(),
+                maintype=maintype,
+                subtype=subtype,
+                filename=attachment.name,
+            )
 
         smtp_endpoint = os.getenv("SMTP_SERVER", self.smtp_server)
         smtp_port = int(os.getenv("SMTP_PORT", str(self.smtp_port)))
