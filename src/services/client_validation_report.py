@@ -134,13 +134,8 @@ class ClientValidationReport:
         output_path: str | Path,
         elapsed_seconds: float | None = None,
     ) -> str:
-        """Consolida os relatórios individuais em um único relatório da execução."""
-        combined_results: dict[str, dict[str, list[str]]] = {}
-        section_fields = {
-            "Falhas": ("failures", "Motivo: "),
-            "Informativos": ("infos", "Informação: "),
-            "Aprovados": ("details", "Detalhe: "),
-        }
+        """Consolida os relatórios mantendo todos os clientes sob cada teste."""
+        grouped_results: list[tuple[str, dict[str, list[tuple[str, list[str]]]]]] = []
         for report_path in report_paths:
             report_content = report_path.read_text(encoding="utf-8")
             test_name = next(
@@ -151,27 +146,39 @@ class ClientValidationReport:
                 ),
                 report_path.stem,
             )
-            for section, clients in cls._parse_sections(report_content).items():
-                field, label = section_fields[section]
+            grouped_results.append((test_name, cls._parse_sections(report_content)))
+
+        duration = str(timedelta(seconds=int(elapsed_seconds or 0)))
+        lines = [
+            "Teste: Resumo geral da execução",
+            f"Ambiente: {os.getenv('TEST_ENV', 'hml').strip().lower()}",
+            f"Duração: {duration}",
+            "",
+            "BDD:",
+            "Consolidado dos resultados de todos os testes executados.",
+            "",
+            "Resultados por teste:",
+        ]
+        for test_name, sections in grouped_results:
+            lines.extend(("", f"Teste executado: {test_name}"))
+            for section, label in (
+                ("Falhas", "Motivo"),
+                ("Informativos", "Informação"),
+                ("Aprovados", "Detalhe"),
+            ):
+                clients = sections[section]
+                lines.append(f"{section} ({len(clients)}):")
                 for client_id, messages in clients:
-                    result_id = f"{test_name} | {client_id}"
-                    result = combined_results.setdefault(
-                        result_id,
-                        {"failures": [], "infos": [], "details": []},
-                    )
-                    result[field].extend(
-                        message.removeprefix(label) for message in messages
+                    lines.append(f"- Cliente: {client_id}")
+                    lines.extend(
+                        f"  {label}: {message.removeprefix(f'{label}: ')}"
+                        for message in messages
                     )
 
-        report = cls(elapsed_seconds=elapsed_seconds)
-        for result_id, result in combined_results.items():
-            report.add_client_result(result_id, **result)
-        content = report.write(
-            output_path,
-            "Resumo geral da execução",
-            "Consolidado dos resultados de todos os testes executados.",
-        )
-        report.close()
+        content = "\n".join(lines).rstrip()
+        destination = Path(output_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content + "\n", encoding="utf-8")
         cls.write_html_from_text(Path(output_path), Path(output_path).with_suffix(".html"))
         return content
 
@@ -263,6 +270,15 @@ class ClientValidationReport:
             if line.startswith("Falhas ("):
                 break
             bdd_lines.append(line)
+
+        if "Resultados por teste:" in lines:
+            html = ClientValidationReport._combined_html_from_text(
+                test_name, environment, duration, report
+            )
+            output_path = Path(html_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(html, encoding="utf-8")
+            return html
 
         sections: dict[str, list[tuple[str, list[str]]]] = {
             "Falhas": [],
@@ -378,6 +394,79 @@ class ClientValidationReport:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(html, encoding="utf-8")
         return html
+
+    @staticmethod
+    def _combined_html_from_text(
+        title: str,
+        environment: str,
+        duration: str,
+        report: str,
+    ) -> str:
+        """Renderiza o consolidado agrupando os clientes no respectivo teste."""
+        groups: list[tuple[str, dict[str, list[tuple[str, list[str]]]]]] = []
+        current_group: dict[str, list[tuple[str, list[str]]]] | None = None
+        current_section: str | None = None
+        for line in report.splitlines():
+            if line.startswith("Teste executado: "):
+                current_group = {"Falhas": [], "Informativos": [], "Aprovados": []}
+                groups.append((line.removeprefix("Teste executado: "), current_group))
+            elif current_group and line.startswith("Falhas ("):
+                current_section = "Falhas"
+            elif current_group and line.startswith("Informativos ("):
+                current_section = "Informativos"
+            elif current_group and line.startswith("Aprovados ("):
+                current_section = "Aprovados"
+            elif current_group and current_section and line.startswith("- Cliente: "):
+                current_group[current_section].append(
+                    (line.removeprefix("- Cliente: "), [])
+                )
+            elif (
+                current_group
+                and current_section
+                and current_group[current_section]
+                and line.startswith("  ")
+            ):
+                current_group[current_section][-1][1].append(line.strip())
+
+        tones = {
+            "Falhas": ("#b42318", "#fff1f0"),
+            "Informativos": ("#9a6700", "#fff8e6"),
+            "Aprovados": ("#16734a", "#edf9f2"),
+        }
+        totals = {
+            section: sum(len(sections[section]) for _, sections in groups)
+            for section in tones
+        }
+
+        def render_clients(section: str, clients: list[tuple[str, list[str]]]) -> str:
+            color, background = tones[section]
+            if not clients:
+                return '<p class="empty">Nenhum registro.</p>'
+            return "".join(
+                f'<details class="client" style="border-left-color:{color};background:{background}">'
+                f'<summary>{escape(client_id)}</summary><ul>'
+                + "".join(f"<li>{escape(message)}</li>" for message in messages)
+                + "</ul></details>"
+                for client_id, messages in clients
+            )
+
+        tests_html = "".join(
+            f'<section class="test"><h2>{escape(test_name)}</h2>'
+            + "".join(
+                f'<section class="status"><h3>{section} ({len(sections[section])})</h3>'
+                f'{render_clients(section, sections[section])}</section>'
+                for section in tones
+            )
+            + "</section>"
+            for test_name, sections in groups
+        )
+        metrics = "".join(
+            f'<div class="metric" style="border-top-color:{color}">{section}'
+            f'<b style="color:{color}">{totals[section]}</b></div>'
+            for section, (color, _) in tones.items()
+        )
+        return f'''<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>{escape(title)}</title><style>
+body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''
 
     @staticmethod
     def email_summary_html_from_text(report_path: str | Path) -> str:

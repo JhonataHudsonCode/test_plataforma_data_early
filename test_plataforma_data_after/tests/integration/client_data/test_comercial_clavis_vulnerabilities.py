@@ -12,6 +12,9 @@ from src.services.client_validation_report import ClientValidationReport
 from src.validators.after_pipeline.opensearch_aliases_validator import (
     OpenSearchAliasesValidator,
 )
+from src.validators.after_pipeline.historical_vulnerability_validator import (
+    HistoricalVulnerabilityValidator,
+)
 from src.validators.after_pipeline.product_data_validator import ProductDataValidator
 
 
@@ -136,6 +139,27 @@ def test_should_validate_oto_dashboard_after_pipeline(
     validator = ProductDataValidator(product_repository, cognito_client_repository)
     results = [
         (target.client_id, *validator.validate_oto_dashboard(target))
+        for target in client_targets
+    ]
+    _assert_validation(results, inspect.currentframe().f_code.co_name)
+
+
+@allure.title("Validar índice {cliente}_vulnerability-historical")
+@pytest.mark.integration
+@pytest.mark.after_pipeline
+@pytest.mark.client_data
+@pytest.mark.opensearch
+def test_should_validate_asset_vulnerability_historical_after_pipeline(
+    cognito_client_repository: CognitoClientRepository,
+    product_repository: OpenSearchVulnerabilityRepository,
+    client_targets: list[ClientTarget],
+) -> None:
+    validator = HistoricalVulnerabilityValidator(
+        product_repository,
+        cognito_client_repository,
+    )
+    results = [
+        (target.client_id, *validator.validate(target))
         for target in client_targets
     ]
     _assert_validation(results, inspect.currentframe().f_code.co_name)
