@@ -116,7 +116,7 @@ def test_should_validate_rules_opensearch_client(
     _save_client_report(report, test_name)
     report.assert_no_failures()
 
-@allure.title("Validar índices vulnerability-was, vulnerability-vm e vulnerability-vm-new")
+@allure.title("Validar índices vulnerability-was e vulnerability-vm-new")
 def test_should_validate_vulnerability_opensearch_product(
     db_client_repository: DataBaseRepository,
     product_repository: OpenSearchVulnerabilityRepository,
