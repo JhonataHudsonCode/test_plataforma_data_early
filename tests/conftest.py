@@ -5,6 +5,7 @@ from collections.abc import Generator
 import pytest
 import subprocess
 import shutil
+from time import perf_counter
 
 from pathlib import Path
 from src.services.email_service import EmailService
@@ -57,6 +58,7 @@ def pytest_sessionstart(session):
     Executado quando a sessão de testes começa. Aqui, podemos realizar ações de configuração ou inicialização.
     """
 
+    session._validation_started_at = perf_counter()
     allure_results_path = Path("allure-results")
     if allure_results_path.exists() and allure_results_path.is_dir():
         shutil.rmtree(allure_results_path)
@@ -80,6 +82,7 @@ def pytest_sessionfinish(session, exitstatus):
         ClientValidationReport.write_combined(
             report_paths,
             Path("reports/client-validation") / general_report_name,
+            elapsed_seconds=perf_counter() - session._validation_started_at,
         )
 
     failed_reports: list[tuple[Path, str]] = []

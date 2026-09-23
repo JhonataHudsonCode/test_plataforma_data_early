@@ -3,7 +3,8 @@ from __future__ import annotations
 import ast
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from time import perf_counter
 from html import escape
 from pathlib import Path
 
@@ -11,8 +12,10 @@ from pathlib import Path
 class ClientValidationReport:
     """Agrupa resultados por cliente e gera os relatórios TXT e HTML da execução."""
 
-    def __init__(self) -> None:
+    def __init__(self, elapsed_seconds: float | None = None) -> None:
         self._results: dict[str, dict[str, list[str]]] = {}
+        self._started_at = perf_counter()
+        self._elapsed_seconds = elapsed_seconds
 
     def close(self) -> None:
         """Mantém a mesma interface do relatório usado pelo projeto early."""
@@ -56,6 +59,7 @@ class ClientValidationReport:
         cls,
         report_paths: list[Path],
         output_path: str | Path,
+        elapsed_seconds: float | None = None,
     ) -> str:
         """Gera um relatório único preservando o resultado de cada teste."""
         combined_results: dict[str, dict[str, list[str]]] = {}
@@ -87,7 +91,7 @@ class ClientValidationReport:
                         message.removeprefix(label) for message in messages
                     )
 
-        combined_report = cls()
+        combined_report = cls(elapsed_seconds=elapsed_seconds)
         for result_id, result in combined_results.items():
             combined_report.add_client_result(result_id, **result)
 
@@ -110,6 +114,7 @@ class ClientValidationReport:
         lines = [
             f"Teste: {test_name}",
             f"Ambiente: {environment}",
+            f"Duração: {self._execution_duration()}",
             "",
             "BDD:",
             bdd,
@@ -127,6 +132,14 @@ class ClientValidationReport:
                 lines.extend(f"  {label}: {message}" for message in messages)
             lines.append("")
         return "\n".join(lines).rstrip()
+
+    def _execution_duration(self) -> str:
+        elapsed_seconds = (
+            self._elapsed_seconds
+            if self._elapsed_seconds is not None
+            else perf_counter() - self._started_at
+        )
+        return str(timedelta(seconds=int(elapsed_seconds)))
 
     def _sections(self) -> dict[str, list[tuple[str, list[str]]]]:
         """Separa falhas, informações e sucessos sem misturar seus conteúdos.
@@ -189,6 +202,10 @@ class ClientValidationReport:
             (line.removeprefix("Ambiente: ") for line in report.splitlines() if line.startswith("Ambiente:")),
             "hml",
         )
+        duration = next(
+            (line.removeprefix("Duração: ") for line in report.splitlines() if line.startswith("Duração:")),
+            "00:00:00",
+        )
         sections = ClientValidationReport._parse_sections(report)
         bdd = ClientValidationReport._bdd_from_report(report)
         counts = {name: len(clients) for name, clients in sections.items()}
@@ -209,7 +226,7 @@ class ClientValidationReport:
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)}</title><style>
 body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.panel{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid}}.metric b{{display:block;font-size:30px}}.fail{{border-color:#b42318}}.info{{border-color:#9a6700}}.pass{{border-color:#16734a}}.panel{{padding:20px;margin-top:16px}}details summary{{cursor:pointer;font-weight:bold;font-size:16px}}.card{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:10px 0;padding:12px 14px}}.empty{{color:#64717d;font-style:italic}}pre{{white-space:pre-wrap;background:#f7f9fb;border-left:4px solid #7591a7;padding:14px}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}
-</style></head><body><main><header><small>RELATÓRIO DE VALIDAÇÃO POR CLIENTE</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Gerado em {generated_at}</p></header>
+</style></head><body><main><header><small>RELATÓRIO DE VALIDAÇÃO POR CLIENTE</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Gerado em {generated_at} · Duração: {escape(duration)}</p></header>
 <section class="grid"><div class="metric fail">FALHAS<b>{counts['Falhas']}</b></div><div class="metric info">INFORMATIVOS<b>{counts['Informativos']}</b></div><div class="metric pass">APROVADOS<b>{counts['Aprovados']}</b></div></section>
 <section class="panel"><h2>BDD executado</h2><pre>{escape(bdd)}</pre></section>
 <section class="panel"><h2>Falhas ({counts['Falhas']})</h2>{cards('Falhas', 'fail', 'Nenhuma falha registrada.')}</section>
@@ -246,6 +263,10 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         environment = next(
             (line.removeprefix("Ambiente: ") for line in report.splitlines() if line.startswith("Ambiente:")),
             "hml",
+        )
+        duration = next(
+            (line.removeprefix("Duração: ") for line in report.splitlines() if line.startswith("Duração:")),
+            "00:00:00",
         )
         sections = ClientValidationReport._parse_sections(report)
         tones = {
@@ -284,7 +305,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
         bdd = escape(ClientValidationReport._bdd_from_report(report)).replace("\n", "<br>")
         return f"""<!doctype html><html lang="pt-BR"><body style="margin:0;padding:0;background:#eef2f5;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2f5;"><tr><td style="padding:24px 12px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px;margin:0 auto;background:#ffffff;"><tr><td style="padding:28px 30px;background:#18324a;font-family:Arial,sans-serif;color:#ffffff;"><div style="font-size:11px;font-weight:bold;letter-spacing:1px;color:#b9c9d7;">RELATÓRIO DE VALIDAÇÃO POR CLIENTE</div><h1 style="font-size:27px;margin:9px 0 10px;color:#ffffff;">{escape(title)}</h1><p style="margin:0;color:#d7e2eb;">Ambiente: <strong>{escape(environment)}</strong> &middot; Gerado em {generated_at}</p></td></tr><tr><td style="padding:20px 22px;"><table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metrics}</tr></table><h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">BDD executado</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="padding:14px 16px;border:1px solid #dfe5ea;border-left:4px solid #7591a7;background:#f7f9fb;font:14px/1.5 Arial,sans-serif;color:#34495a;">{bdd}</td></tr></table>{render_section("Falhas")}{render_section("Informativos")}{render_section("Aprovados")}</td></tr></table></td></tr></table></body></html>"""
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2f5;"><tr><td style="padding:24px 12px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px;margin:0 auto;background:#ffffff;"><tr><td style="padding:28px 30px;background:#18324a;font-family:Arial,sans-serif;color:#ffffff;"><div style="font-size:11px;font-weight:bold;letter-spacing:1px;color:#b9c9d7;">RELATÓRIO DE VALIDAÇÃO POR CLIENTE</div><h1 style="font-size:27px;margin:9px 0 10px;color:#ffffff;">{escape(title)}</h1><p style="margin:0;color:#d7e2eb;">Ambiente: <strong>{escape(environment)}</strong> &middot; Gerado em {generated_at} &middot; Duração: <strong>{escape(duration)}</strong></p></td></tr><tr><td style="padding:20px 22px;"><table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metrics}</tr></table><h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">BDD executado</h2><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="padding:14px 16px;border:1px solid #dfe5ea;border-left:4px solid #7591a7;background:#f7f9fb;font:14px/1.5 Arial,sans-serif;color:#34495a;">{bdd}</td></tr></table>{render_section("Falhas")}{render_section("Informativos")}{render_section("Aprovados")}</td></tr></table></td></tr></table></body></html>"""
 
     @staticmethod
     def _render_message(message: str) -> str:

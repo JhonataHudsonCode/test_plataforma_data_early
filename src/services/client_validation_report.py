@@ -5,7 +5,8 @@ import ast
 import logging
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+from time import perf_counter
 
 
 class _ClientReportLogHandler(logging.Handler):
@@ -20,8 +21,10 @@ class _ClientReportLogHandler(logging.Handler):
 class ClientValidationReport:
     """Coleta falhas por cliente e gera um relatório textual curado."""
 
-    def __init__(self) -> None:
+    def __init__(self, elapsed_seconds: float | None = None) -> None:
         self._results: dict[str, dict[str, list[str]]] = {}
+        self._started_at = perf_counter()
+        self._elapsed_seconds = elapsed_seconds
         self._log_records: list[str] = []
         self._log_cursor = 0
         self._log_handler = _ClientReportLogHandler(self._log_records)
@@ -68,6 +71,7 @@ class ClientValidationReport:
         lines = [
             f"Teste: {test_name}",
             f"Ambiente: {environment}",
+            f"Duração: {self._execution_duration()}",
             "",
             "BDD:",
             bdd,
@@ -85,6 +89,14 @@ class ClientValidationReport:
                 lines.extend(f"  {label}: {message}" for message in messages)
             lines.append("")
         return "\n".join(lines).rstrip()
+
+    def _execution_duration(self) -> str:
+        elapsed_seconds = (
+            self._elapsed_seconds
+            if self._elapsed_seconds is not None
+            else perf_counter() - self._started_at
+        )
+        return str(timedelta(seconds=int(elapsed_seconds)))
 
     def _sections(self) -> dict[str, list[tuple[str, list[str]]]]:
         """Mantém falhas, informações e validações aprovadas em seções distintas."""
@@ -120,6 +132,7 @@ class ClientValidationReport:
         cls,
         report_paths: list[Path],
         output_path: str | Path,
+        elapsed_seconds: float | None = None,
     ) -> str:
         """Consolida os relatórios individuais em um único relatório da execução."""
         combined_results: dict[str, dict[str, list[str]]] = {}
@@ -150,7 +163,7 @@ class ClientValidationReport:
                         message.removeprefix(label) for message in messages
                     )
 
-        report = cls()
+        report = cls(elapsed_seconds=elapsed_seconds)
         for result_id, result in combined_results.items():
             report.add_client_result(result_id, **result)
         content = report.write(
@@ -235,6 +248,14 @@ class ClientValidationReport:
                 if line.startswith("Ambiente:")
             ),
             os.getenv("TEST_ENV", "hml").strip().lower(),
+        )
+        duration = next(
+            (
+                line.removeprefix("Duração: ").strip()
+                for line in lines
+                if line.startswith("Duração:")
+            ),
+            "00:00:00",
         )
         bdd_start = lines.index("BDD:") + 1 if "BDD:" in lines else 0
         bdd_lines: list[str] = []
@@ -338,7 +359,7 @@ class ClientValidationReport:
   <header class="hero">
     <div class="eyebrow">Relatório de validação por cliente</div>
     <h1>{escape(test_name)}</h1>
-    <p class="meta">Ambiente: <strong>{escape(environment)}</strong> · Gerado em {generated_at}</p>
+    <p class="meta">Ambiente: <strong>{escape(environment)}</strong> · Gerado em {generated_at} · Duração: <strong>{escape(duration)}</strong></p>
   </header>
   <section class="summary">
     <div class="metric fail"><div class="metric-label">Falhas</div><div class="metric-value">{counts['Falhas']}</div></div>
@@ -374,6 +395,14 @@ class ClientValidationReport:
                 if line.startswith("Ambiente:")
             ),
             os.getenv("TEST_ENV", "hml").strip().lower(),
+        )
+        duration = next(
+            (
+                line.removeprefix("Duração: ").strip()
+                for line in lines
+                if line.startswith("Duração:")
+            ),
+            "00:00:00",
         )
         bdd_start = lines.index("BDD:") + 1 if "BDD:" in lines else None
         bdd_lines: list[str] = []
@@ -450,7 +479,7 @@ class ClientValidationReport:
       <tr><td style="padding:28px 30px;background:#18324a;font-family:Arial,sans-serif;color:#ffffff;">
         <div style="font-size:11px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;color:#b9c9d7;">Relatório de validação por cliente</div>
         <h1 style="font-size:27px;line-height:1.2;margin:9px 0 10px;color:#ffffff;">{escape(test_name)}</h1>
-        <p style="margin:0;color:#d7e2eb;">Ambiente: <strong>{escape(environment)}</strong> &middot; Gerado em {generated_at}</p>
+        <p style="margin:0;color:#d7e2eb;">Ambiente: <strong>{escape(environment)}</strong> &middot; Gerado em {generated_at} &middot; Duração: <strong>{escape(duration)}</strong></p>
       </td></tr>
       <tr><td style="padding:20px 22px;">
         <table role="presentation" width="100%" cellspacing="8" cellpadding="0"><tr>{metric_cells}</tr></table>
