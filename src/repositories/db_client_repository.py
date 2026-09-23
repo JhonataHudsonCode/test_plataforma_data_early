@@ -105,21 +105,19 @@ class DataBaseRepository:
         self,
         schema_name: str,
         client_id: str,
-        activation_key_name: str,
         query_table: str
     ) -> bool:
         query = sql.SQL(query_table).format(
             schema_name=sql.Identifier(schema_name),
         )
         with self._connection.client.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query, (client_id, activation_key_name))
+            cursor.execute(query, (client_id,))
             return cursor.fetchone() is not None
 
     def get_activation_keys(
         self,
         schema_name: str,
         client_id: str,
-        activation_key_name: str,
         query_table: str,
     ) -> list[dict[str, Any]]:
         """Retorna todas as chaves encontradas para detectar ausências e duplicidades."""
@@ -127,7 +125,7 @@ class DataBaseRepository:
             schema_name=sql.Identifier(schema_name),
         )
         with self._connection.client.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query, (client_id, activation_key_name))
+            cursor.execute(query, (client_id,))
             return list(cursor.fetchall())
 
     def has_rsa(self, schema_name: str, client_id: str) -> bool | None:

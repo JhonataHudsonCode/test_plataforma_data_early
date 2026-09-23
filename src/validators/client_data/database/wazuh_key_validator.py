@@ -21,31 +21,33 @@ class WazuhKeyValidator:
         keys = self._assets_repository.get_activation_keys(
             "public",
             target.client_id,
-            target.activation_key_name or "",
             SELECT_ASSETS_CLIENT_ACTIVATION_KEYS,
         )
         if not keys:
-            return ClientValidationResult(target.client_id, failures=[f"Chave de ativação '{target.activation_key_name}' não encontrada."])
+            return ClientValidationResult(
+                target.client_id,
+                failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."],
+            )
         if len(keys) > 1:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Chave do Wazuh '{target.activation_key_name}' possui "
+                    f"Cliente '{target.client_id}' possui "
                     f"{len(keys)} registros cadastrados; era esperado apenas 1."
                 ],
             )
 
-        required_fields = ("activation_key_id", "client_id", "activation_key_name")
+        required_fields = ("activation_key_id", "client_id")
         missing_fields = [field for field in required_fields if not keys[0].get(field)]
         if missing_fields:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Chave do Wazuh '{target.activation_key_name}' possui dados "
+                    f"Chave do Wazuh do cliente '{target.client_id}' possui dados "
                     f"ausentes na tabela: {', '.join(missing_fields)}."
                 ],
             )
         return ClientValidationResult(
             target.client_id,
-            details=[f"Chave do Wazuh '{target.activation_key_name}' encontrada."],
+            details=[f"Chave do Wazuh do cliente '{target.client_id}' encontrada."],
         )

@@ -78,7 +78,6 @@ class ClientOpenSearchCredentials:
     name: str
     endpoint: str
     client_id: str
-    activation_key_name: str
     username: str
     password: str
 
@@ -100,7 +99,6 @@ class ClientTarget:
     """Cliente selecionado para a execução, pelo banco ou por credenciais."""
 
     client_id: str
-    activation_key_name: str | None = None
     endpoint: str | None = None
     credentials: ClientOpenSearchCredentials | None = None
 
@@ -150,7 +148,6 @@ def client_credentials_from_env() -> list[ClientOpenSearchCredentials]:
                 name=name,
                 endpoint=str(endpoint),
                 client_id=str(value.get("client_id", name)),
-                activation_key_name=str(value.get("activation_key_name", "")),
                 username=_resolve_secret(str(value.get("username", "")), "OPENSEARCH_USER"),
                 password=_resolve_secret(str(value.get("password", "")), "OPENSEARCH_PASSWORD"),
             )

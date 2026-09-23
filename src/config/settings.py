@@ -84,7 +84,6 @@ class ClientOpenSearchCredentials:
     name: str
     endpoint: str
     client_id: str
-    activation_key_name: str
     username: str
     password: str
 
@@ -115,7 +114,6 @@ class WazuhCredentials:
 @dataclass(frozen=True, slots=True)
 class ClientTarget:
     client_id: str
-    activation_key_name: str | None = None
     endpoint: str | None = None
     credentials: ClientOpenSearchCredentials | None = None
 
@@ -160,7 +158,6 @@ def client_credentials_from_env() -> list[ClientOpenSearchCredentials]:
                 name=name,
                 endpoint=endpoint,
                 client_id=str(value.get("client_id", name)),
-                activation_key_name=str(value.get("activation_key_name", "")),
                 username=_resolve_secret(
                     str(value.get("username", "")),
                     "OPENSEARCH_USER",

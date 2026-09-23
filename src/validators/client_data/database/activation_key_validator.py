@@ -18,10 +18,17 @@ class ActivationKeyValidator:
             return ClientValidationResult(target.client_id, failures=[f"Cliente '{target.client_id}' não encontrado no Cognito; consulta de has_bart não retornou registro."])
         if not client.get("has_bart"):
             return ClientValidationResult(target.client_id, infos=[f"Cliente '{target.client_id}' possui has_bart desabilitado; chave de ativação não aplicável."])
-        found = self._assets_repository.has_activation_key("public", target.client_id, target.activation_key_name or "", SELECT_ASSETS_CLIENT_ACTIVATION_KEYS)
+        found = self._assets_repository.has_activation_key(
+            "public",
+            target.client_id,
+            SELECT_ASSETS_CLIENT_ACTIVATION_KEYS,
+        )
         if not found:
-            return ClientValidationResult(target.client_id, failures=[f"Chave de ativação '{target.activation_key_name}' não encontrada."])
+            return ClientValidationResult(
+                target.client_id,
+                failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."],
+            )
         return ClientValidationResult(
             target.client_id,
-            details=[f"Chave de ativação '{target.activation_key_name}' encontrada."],
+            details=[f"Cliente '{target.client_id}' possui chave de ativação cadastrada."],
         )

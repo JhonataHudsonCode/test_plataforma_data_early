@@ -269,7 +269,6 @@ def client_targets(
         return [
             ClientTarget(
                 client_id=item.client_id,
-                activation_key_name=item.activation_key_name,
                 credentials=item,
             )
             for item in client_credentials
