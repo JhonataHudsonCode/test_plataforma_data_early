@@ -290,10 +290,12 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
                 for client_id, messages in sections[name]
             ) or '<tr><td style="padding:14px 16px;border:1px solid #dfe5ea;color:#64717d;">Nenhum registro.</td></tr>'
             return (
-                f'<h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">'
-                f'{name} ({len(sections[name])})</h2>'
+                f'<details style="margin-top:26px;">'
+                f'<summary style="cursor:pointer;font:700 18px Arial,sans-serif;color:#17202a;">'
+                f'{name} ({len(sections[name])})</summary>'
                 f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
-                f'style="border-collapse:collapse;">{rows}</table>'
+                f'style="border-collapse:collapse;margin-top:10px;">{rows}</table>'
+                '</details>'
             )
 
         metrics = "".join(

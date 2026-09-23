@@ -452,10 +452,12 @@ class ClientValidationReport:
                 'Nenhum registro.</td></tr>'
             )
             return (
-                f'<h2 style="font:700 18px Arial,sans-serif;color:#17202a;margin:26px 0 10px;">'
-                f'{name} ({len(clients)})</h2>'
+                f'<details style="margin-top:26px;">'
+                f'<summary style="cursor:pointer;font:700 18px Arial,sans-serif;color:#17202a;">'
+                f'{name} ({len(clients)})</summary>'
                 f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
-                f'style="border-collapse:collapse;">{content}</table>'
+                f'style="border-collapse:collapse;margin-top:10px;">{content}</table>'
+                '</details>'
             )
 
         metrics = (
