@@ -83,8 +83,12 @@ class ProductDataValidator:
         }
         for suffix, expected_mapping in historical_mappings.items():
             index_name = f"{target.client_id}_{suffix}"
-            self._validate_mapping(index_name, expected_mapping, errors, details)
-            self._validate_assets_variation(index_name, errors, details)
+            self._validate_assets_variation(
+                index_name,
+                expected_mapping,
+                errors,
+                details,
+            )
         return errors, details
 
     def validate_current_asset_index(
@@ -966,6 +970,7 @@ class ProductDataValidator:
     def _validate_assets_variation(
         self,
         index_name: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
         errors: list[str],
         details: list[str],
     ) -> None:
@@ -994,6 +999,21 @@ class ProductDataValidator:
         )
         if current_documents is None or previous_documents is None:
             return
+
+        # Os documentos podem pertencer a índices físicos diferentes. Valida-se
+        # tanto o mapping de cada índice físico quanto o _source de cada retorno.
+        self._validate_mappings_for_documents(
+            [*current_documents, *previous_documents],
+            expected_mapping,
+            errors,
+            details,
+        )
+        if len(current_documents) != len(previous_documents):
+            errors.append(
+                f"Índice '{index_name}' | quantidade de documentos divergente: "
+                f"{self._reference_date.isoformat()}={len(current_documents)}; "
+                f"{previous_date.isoformat()}={len(previous_documents)}."
+            )
         if not current_documents or not previous_documents:
             missing_date = (
                 self._reference_date if not current_documents else previous_date
