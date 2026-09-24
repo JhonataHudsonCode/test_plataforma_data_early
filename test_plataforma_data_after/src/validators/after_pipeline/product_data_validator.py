@@ -977,7 +977,7 @@ class ProductDataValidator:
                 "assets_with_unauthorized_softwares",
             )
         elif index_name.endswith("_asset-historical-observability"):
-            fields = ("asset.monitored_vulns", "asset.monitored_events")
+            fields = ("assets.monitored_vulns", "assets.monitored_events")
         else:
             return
 
