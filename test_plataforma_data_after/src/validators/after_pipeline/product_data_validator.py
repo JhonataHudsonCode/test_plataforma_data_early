@@ -587,7 +587,10 @@ class ProductDataValidator:
             timestamp = self._source(document).get(timestamp_field)
             document_date = self._parse_date(timestamp)
             if document_date != self._reference_date:
-                invalid_timestamps.append(str(timestamp or "não informado"))
+                document_id = str(document.get("_id", "não informado"))
+                invalid_timestamps.append(
+                    f"_id={document_id}, {timestamp_field}={timestamp or 'não informado'}"
+                )
 
         if invalid_timestamps:
             errors.append(
@@ -616,9 +619,11 @@ class ProductDataValidator:
         mapping_validator = OpenSearchMappingValidator()
         for position, document in enumerate(documents, start=1):
             document_index = document.get("_index")
+            document_id = str(document.get("_id", "não informado"))
             if not isinstance(document_index, str) or not document_index:
                 errors.append(
-                    f"Documento {position} da busca de ativos não retornou o nome do índice (_index)."
+                    f"Documento {position} (_id={document_id}) da busca de ativos não "
+                    "retornou o nome do índice (_index)."
                 )
                 continue
             indexes_from_documents.add(document_index)
@@ -630,7 +635,7 @@ class ProductDataValidator:
             )
             if document_mapping_errors:
                 errors.extend(
-                    f"Índice '{document_index}' | documento {position} | "
+                    f"Índice '{document_index}' | documento {position} (_id={document_id}) | "
                     f"mapping inválido: {error}"
                     for error in document_mapping_errors
                 )
