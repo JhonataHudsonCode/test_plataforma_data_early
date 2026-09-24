@@ -84,6 +84,14 @@ def pytest_sessionstart(session):
     CLIENT_REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
 
+@pytest.fixture(autouse=True)
+def measure_validation_test_duration() -> Generator[None, None, None]:
+    """Mede o teste inteiro, inclusive as consultas anteriores à criação do report."""
+    token = ClientValidationReport.start_current_test_timer()
+    yield
+    ClientValidationReport.reset_current_test_timer(token)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     """Gera um report mínimo se o teste falhar antes de salvar o próprio relatório."""

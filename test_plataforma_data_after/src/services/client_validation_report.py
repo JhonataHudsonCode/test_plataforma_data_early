@@ -3,10 +3,17 @@ from __future__ import annotations
 import ast
 import os
 import re
+from contextvars import ContextVar, Token
 from datetime import datetime, timedelta
 from time import perf_counter
 from html import escape
 from pathlib import Path
+
+
+_CURRENT_TEST_STARTED_AT: ContextVar[float | None] = ContextVar(
+    "current_validation_test_started_at",
+    default=None,
+)
 
 
 class ClientValidationReport:
@@ -14,8 +21,17 @@ class ClientValidationReport:
 
     def __init__(self, elapsed_seconds: float | None = None) -> None:
         self._results: dict[str, dict[str, list[str]]] = {}
-        self._started_at = perf_counter()
+        self._started_at = _CURRENT_TEST_STARTED_AT.get() or perf_counter()
         self._elapsed_seconds = elapsed_seconds
+
+    @staticmethod
+    def start_current_test_timer() -> Token[float | None]:
+        """Marca o início do teste para medir também suas validações."""
+        return _CURRENT_TEST_STARTED_AT.set(perf_counter())
+
+    @staticmethod
+    def reset_current_test_timer(token: Token[float | None]) -> None:
+        _CURRENT_TEST_STARTED_AT.reset(token)
 
     def close(self) -> None:
         """Mantém a mesma interface do relatório usado pelo projeto early."""
