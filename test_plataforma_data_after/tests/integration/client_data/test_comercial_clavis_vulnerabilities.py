@@ -54,7 +54,25 @@ def _assert_validation(
     report.assert_no_failures()
 
 
-@allure.title("Validar {cliente}_asset*, asset-historical-observability e asset-historical-software")
+@allure.title("Validar índice diário {cliente}_asset-{data atual}")
+@pytest.mark.integration
+@pytest.mark.after_pipeline
+@pytest.mark.client_data
+@pytest.mark.opensearch
+def test_should_validate_current_asset_index_after_pipeline(
+    cognito_client_repository: CognitoClientRepository,
+    product_repository: OpenSearchVulnerabilityRepository,
+    client_targets: list[ClientTarget],
+) -> None:
+    validator = ProductDataValidator(product_repository, cognito_client_repository)
+    results = [
+        (target.client_id, *validator.validate_current_asset_index(target))
+        for target in client_targets
+    ]
+    _assert_validation(results, inspect.currentframe().f_code.co_name)
+
+
+@allure.title("Validar {cliente}_asset-historical-observability e asset-historical-software")
 @pytest.mark.integration
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
