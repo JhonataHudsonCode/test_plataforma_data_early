@@ -92,7 +92,7 @@ class ClientValidationReport:
             )
             grouped_results.append((test_name, cls._parse_sections(report_content)))
 
-        duration = str(timedelta(seconds=int(elapsed_seconds or 0)))
+        duration = cls._format_duration(elapsed_seconds or 0)
         lines = [
             "Teste: Resumo geral da execução",
             f"Ambiente: {os.getenv('TEST_ENV', 'hml').strip().lower()}",
@@ -162,7 +162,12 @@ class ClientValidationReport:
             if self._elapsed_seconds is not None
             else perf_counter() - self._started_at
         )
-        return str(timedelta(seconds=int(elapsed_seconds)))
+        return self._format_duration(elapsed_seconds)
+
+    @staticmethod
+    def _format_duration(elapsed_seconds: float) -> str:
+        """Preserva centésimos para a duração não parecer ausente em testes rápidos."""
+        return str(timedelta(seconds=round(elapsed_seconds, 2)))
 
     def _sections(self) -> dict[str, list[tuple[str, list[str]]]]:
         """Separa falhas, informações e sucessos sem misturar seus conteúdos.
@@ -262,9 +267,9 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
 </style></head><body><main><header><small>RELATÓRIO DE VALIDAÇÃO POR CLIENTE</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Gerado em {generated_at} · Duração: {escape(duration)}</p></header>
 <section class="grid"><div class="metric fail">FALHAS<b>{counts['Falhas']}</b></div><div class="metric info">INFORMATIVOS<b>{counts['Informativos']}</b></div><div class="metric pass">APROVADOS<b>{counts['Aprovados']}</b></div></section>
 <section class="panel"><h2>BDD executado</h2><pre>{escape(bdd)}</pre></section>
-<section class="panel"><h2>Falhas ({counts['Falhas']})</h2>{cards('Falhas', 'fail', 'Nenhuma falha registrada.')}</section>
-<section class="panel"><h2>Informativos ({counts['Informativos']})</h2>{cards('Informativos', 'info', 'Nenhum registro informativo.')}</section>
-<section class="panel"><h2>Aprovados ({counts['Aprovados']})</h2>{cards('Aprovados', 'pass', 'Nenhum cliente aprovado.')}</section>
+<details class="panel section"><summary>Falhas ({counts['Falhas']})</summary>{cards('Falhas', 'fail', 'Nenhuma falha registrada.')}</details>
+<details class="panel section"><summary>Informativos ({counts['Informativos']})</summary>{cards('Informativos', 'info', 'Nenhum registro informativo.')}</details>
+<details class="panel section"><summary>Aprovados ({counts['Aprovados']})</summary>{cards('Aprovados', 'pass', 'Nenhum cliente aprovado.')}</details>
 </main></body></html>"""
         output_path = Path(html_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -332,8 +337,8 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         tests_html = "".join(
             f'<section class="test"><h2>{escape(test_name)}</h2>'
             + "".join(
-                f'<section class="status"><h3>{section} ({len(sections[section])})</h3>'
-                f'{render_clients(section, sections[section])}</section>'
+                f'<details class="status"><summary>{section} ({len(sections[section])})</summary>'
+                f'{render_clients(section, sections[section])}</details>'
                 for section in tones
             )
             + "</section>"
