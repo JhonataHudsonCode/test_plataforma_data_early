@@ -83,22 +83,8 @@ class ProductDataValidator:
         }
         for suffix, expected_mapping in historical_mappings.items():
             index_name = f"{target.client_id}_{suffix}"
-            documents = self._validate_index(
-                index_name,
-                "date",
-                errors,
-                details,
-                continue_when_outdated=True,
-            )
             self._validate_mapping(index_name, expected_mapping, errors, details)
-            if documents is not None and documents.previous is not None:
-                self._validate_assets_variation(
-                    index_name,
-                    documents.latest,
-                    documents.previous,
-                    errors,
-                    details,
-                )
+            self._validate_assets_variation(index_name, errors, details)
         return errors, details
 
     def validate_current_asset_index(
@@ -980,175 +966,129 @@ class ProductDataValidator:
     def _validate_assets_variation(
         self,
         index_name: str,
-        latest_document: dict[str, Any],
-        previous_document: dict[str, Any],
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Garante que os indicadores do índice não cresçam mais de 50% ao dia."""
+        """Compara a soma diária dos indicadores dos históricos de ativos."""
         if index_name.endswith("_asset-historical-software"):
-            latest_values = self._source(latest_document)
-            previous_values = self._source(previous_document)
             fields = (
                 "assets_total",
                 "assets_missing_mandatory_softwares",
                 "assets_with_unauthorized_softwares",
             )
-            field_prefix = ""
-            self._validate_fifty_percent_variation(
-                index_name,
-                self._variation_fields(latest_values, previous_values, fields, field_prefix),
-                errors,
-                details,
-            )
         elif index_name.endswith("_asset-historical-observability"):
-            latest_values = self._source(latest_document).get("asset")
-            previous_values = self._source(previous_document).get("asset")
-            fields = ("monitored_vulns", "monitored_events")
-            field_prefix = "asset."
-            self._validate_fifty_percent_variation(
-                index_name,
-                self._variation_fields(latest_values, previous_values, fields, field_prefix),
-                errors,
-                details,
-            )
+            fields = ("asset.monitored_vulns", "asset.monitored_events")
         else:
-            latest_values = self._source(latest_document).get("asset")
-            previous_values = self._source(previous_document).get("asset")
-            if not isinstance(latest_values, dict) or not isinstance(previous_values, dict):
-                errors.append(
-                    f"Índice '{index_name}' | campo asset ausente nos documentos "
-                    "mais recente ou do dia anterior."
-                )
-                return
-            self._validate_asset_events_equality(
-                index_name,
-                latest_values,
-                previous_values,
-                errors,
-                details,
-            )
-
-    @staticmethod
-    def _variation_fields(
-        latest_values: object,
-        previous_values: object,
-        fields: tuple[str, ...],
-        field_prefix: str,
-    ) -> tuple[tuple[str, object, object], ...]:
-        if not isinstance(latest_values, dict) or not isinstance(previous_values, dict):
-            return tuple((f"{field_prefix}{field}", None, None) for field in fields)
-        return tuple(
-            (
-                f"{field_prefix}{field}",
-                latest_values.get(field),
-                previous_values.get(field),
-            )
-            for field in fields
-        )
-
-    def _validate_asset_events_equality(
-        self,
-        index_name: str,
-        latest_asset: dict[str, Any],
-        previous_asset: dict[str, Any],
-        errors: list[str],
-        details: list[str],
-    ) -> None:
-        """Valida campos estáveis de asset_events entre os índices diários de ativos."""
-        latest_events = latest_asset.get("asset_events", latest_asset.get("assets_events"))
-        previous_events = previous_asset.get("asset_events", previous_asset.get("assets_events"))
-        if not isinstance(latest_events, dict) or not isinstance(previous_events, dict):
-            errors.append(
-                f"Índice '{index_name}' | asset_events ausente nos documentos "
-                "mais recente ou do dia anterior."
-            )
             return
 
-        latest_compliance = latest_events.get("compliance")
-        previous_compliance = previous_events.get("compliance")
-        if not isinstance(latest_compliance, dict) or not isinstance(previous_compliance, dict):
-            errors.append(
-                f"Índice '{index_name}' | asset_events.compliance ausente nos documentos "
-                "mais recente ou do dia anterior."
-            )
-            return
-
-        latest_technology = latest_events.get(
-            "technology",
-            latest_compliance.get("technology"),
-        )
-        previous_technology = previous_events.get(
-            "technology",
-            previous_compliance.get("technology"),
-        )
-        if latest_technology is None or previous_technology is None:
-            errors.append(
-                f"Índice '{index_name}' | asset_events.technology ausente nos documentos "
-                "mais recente ou do dia anterior."
-            )
-        elif latest_technology != previous_technology:
-            errors.append(
-                f"Índice '{index_name}' | asset_events.technology divergente entre os índices: "
-                f"anterior={previous_technology!r}, mais recente={latest_technology!r}."
-            )
-        else:
-            details.append(
-                f"Índice '{index_name}' | asset_events.technology igual nos índices de hoje "
-                f"e ontem: {latest_technology!r}."
-            )
-
-        self._validate_score_maximum_decrease(
+        previous_date = self._reference_date - timedelta(days=1)
+        current_documents = self._get_documents_for_date(
             index_name,
-            latest_compliance.get("score"),
-            previous_compliance.get("score"),
+            self._reference_date,
+            errors,
+        )
+        previous_documents = self._get_documents_for_date(
+            index_name,
+            previous_date,
+            errors,
+        )
+        if current_documents is None or previous_documents is None:
+            return
+        if not current_documents or not previous_documents:
+            missing_date = (
+                self._reference_date if not current_documents else previous_date
+            )
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos em "
+                f"{missing_date.isoformat()} para calcular a variação diária."
+            )
+            return
+
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name,
+            current_documents,
+            fields,
+            errors,
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name,
+            previous_documents,
+            fields,
+            errors,
+        )
+        invalid_fields = current_invalid_fields | previous_invalid_fields
+        valid_fields = tuple(field for field in fields if field not in invalid_fields)
+        if not valid_fields:
+            return
+
+        details.append(
+            f"Índice '{index_name}' | soma de {len(current_documents)} documento(s) em "
+            f"{self._reference_date.isoformat()} comparada com {len(previous_documents)} "
+            f"documento(s) em {previous_date.isoformat()}."
+        )
+        self._validate_fifty_percent_variation(
+            index_name,
+            tuple(
+                (field, current_totals[field], previous_totals[field])
+                for field in valid_fields
+            ),
             errors,
             details,
         )
 
-    def _validate_score_maximum_decrease(
+    def _get_documents_for_date(
         self,
         index_name: str,
-        current_value: object,
-        previous_value: object,
+        reference_date: date,
         errors: list[str],
-        details: list[str],
-    ) -> None:
-        """Falha quando o score mais recente cai 50% ou mais em relação ao anterior."""
-        field_name = "asset_events.compliance.score"
-        if not self._is_number(current_value) or not self._is_number(previous_value):
-            errors.append(
-                f"Índice '{index_name}' | {field_name} deve ser numérico nos documentos "
-                "mais recente e do dia anterior."
+    ) -> list[dict[str, Any]] | None:
+        start = datetime.combine(reference_date, datetime.min.time())
+        try:
+            return self._repository.get_documents_between(
+                index_name,
+                start,
+                start + timedelta(days=1),
+                timestamp_field="date",
             )
-            return
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos de "
+                f"{reference_date.isoformat()}: {error.__class__.__name__}: {error}"
+            )
+            return None
 
-        current = float(current_value)
-        previous = float(previous_value)
-        if current < 0 or previous < 0:
-            errors.append(
-                f"Índice '{index_name}' | {field_name} não pode possuir valor negativo "
-                f"(anterior={previous_value}, mais recente={current_value})."
-            )
-            return
-        if previous == 0:
-            details.append(
-                f"Índice '{index_name}' | {field_name}: anterior=0, mais recente={current_value}; "
-                "não há redução percentual a validar."
-            )
-            return
+    def _sum_document_fields(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        fields: tuple[str, ...],
+        errors: list[str],
+    ) -> tuple[dict[str, float], set[str]]:
+        totals = {field: 0.0 for field in fields}
+        invalid_fields: set[str] = set()
+        for position, document in enumerate(documents, start=1):
+            source = self._source(document)
+            document_id = str(document.get("_id", "não informado"))
+            for field in fields:
+                value = self._get_nested_value(source, field)
+                if not self._is_number(value):
+                    errors.append(
+                        f"Índice '{index_name}' | documento {position} (_id={document_id}) | "
+                        f"{field} deve ser numérico para compor a soma diária."
+                    )
+                    invalid_fields.add(field)
+                    continue
+                totals[field] += float(value)
+        return totals, invalid_fields
 
-        variation = (current - previous) / previous
-        details.append(
-            f"Índice '{index_name}' | {field_name}: anterior={previous_value}, "
-            f"mais recente={current_value}, variação={variation:.0%}."
-        )
-        if variation <= -0.5:
-            errors.append(
-                f"Índice '{index_name}' | {field_name} reduziu {abs(variation):.0%} "
-                f"(anterior={previous_value}, mais recente={current_value}); "
-                "redução máxima permitida: menos de 50%."
-            )
+    @staticmethod
+    def _get_nested_value(source: dict[str, Any], field_path: str) -> object:
+        value: object = source
+        for field_name in field_path.split("."):
+            if not isinstance(value, dict):
+                return None
+            value = value.get(field_name)
+        return value
 
     def _validate_fifty_percent_variation(
         self,
@@ -1157,12 +1097,12 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Falha quando um indicador numérico cresce mais de 50% entre dois documentos."""
+        """Falha quando um total diário cresce mais de 50% em relação ao dia anterior."""
         for field_name, current_value, previous_value in fields:
             if not self._is_number(current_value) or not self._is_number(previous_value):
                 errors.append(
-                    f"Índice '{index_name}' | {field_name} deve ser numérico nos "
-                    "documentos mais recente e do dia anterior."
+                    f"Índice '{index_name}' | total de {field_name} deve ser numérico "
+                    "nos dias comparados."
                 )
                 continue
 
@@ -1170,31 +1110,31 @@ class ProductDataValidator:
             previous = float(previous_value)
             if previous < 0 or current < 0:
                 errors.append(
-                    f"Índice '{index_name}' | {field_name} não pode possuir valor negativo "
-                    f"(anterior={previous_value}, mais recente={current_value})."
+                    f"Índice '{index_name}' | total de {field_name} não pode possuir valor "
+                    f"negativo (ontem={previous_value}, hoje={current_value})."
                 )
                 continue
             if previous == 0:
                 if current > 0:
                     errors.append(
-                        f"Índice '{index_name}' | {field_name} aumentou de 0 para "
+                        f"Índice '{index_name}' | total de {field_name} aumentou de 0 para "
                         f"{current_value}; excede o limite de 50%."
                     )
                 else:
                     details.append(
-                        f"Índice '{index_name}' | {field_name}: sem variação (0 para 0)."
+                        f"Índice '{index_name}' | total de {field_name}: sem variação (0 para 0)."
                     )
                 continue
 
             variation = (current - previous) / previous
             details.append(
-                f"Índice '{index_name}' | {field_name}: anterior={previous_value}, "
-                f"mais recente={current_value}, variação={variation:.0%}."
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
             )
             if variation > 0.5:
                 errors.append(
-                    f"Índice '{index_name}' | {field_name} aumentou {variation:.0%} "
-                    f"(anterior={previous_value}, mais recente={current_value}); "
+                f"Índice '{index_name}' | total de {field_name} aumentou {variation:.0%} "
+                f"(ontem={previous_value}, hoje={current_value}); "
                     "máximo permitido: 50%."
                 )
 

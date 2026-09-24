@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-import inspect
 
 import pytest
 import subprocess
@@ -58,23 +57,14 @@ def _send_report_email(
     body: str,
     report_path: Path,
 ) -> bool:
-    """Envia um resumo e anexa o HTML completo quando o serviço suporta ambos."""
-    send_email = email_service.send_email
-    parameters = inspect.signature(send_email).parameters
-    if "html_body" not in parameters:
-        print(
-            "Aviso: EmailService instalado não suporta html_body; "
-            "o relatório será enviado em texto simples."
-        )
-        return send_email(subject, body)
-
-    kwargs: dict[str, object] = {
-        "html_body": ClientValidationReport.email_summary_html_from_text(report_path),
-    }
-    if "attachment_path" in parameters:
-        kwargs["attachment_path"] = report_path.with_suffix(".html")
+    """Envia resumo HTML e anexa o relatório completo, expansível e baixável."""
     print("Enviando resumo do relatório e HTML completo como anexo.")
-    return send_email(subject, body, **kwargs)
+    return email_service.send_email(
+        subject,
+        body,
+        html_body=ClientValidationReport.email_summary_html_from_text(report_path),
+        attachment_path=report_path.with_suffix(".html"),
+    )
 
 
 @pytest.hookimpl(tryfirst=True)
