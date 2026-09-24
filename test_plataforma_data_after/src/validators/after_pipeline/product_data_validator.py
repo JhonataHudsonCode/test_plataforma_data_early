@@ -540,7 +540,7 @@ class ProductDataValidator:
     ) -> None:
         index_name = f"{client_id}_asset"
         try:
-            returned_count, documents = self._repository.get_documents_by_date_match(
+            documents = self._repository.get_documents_by_date_match(
                 index_name,
                 self._reference_date,
                 timestamp_field,
@@ -559,17 +559,14 @@ class ProductDataValidator:
                 f"{timestamp_field} em {self._reference_date.isoformat()}."
             )
             return
-        if returned_count != len(documents):
-            errors.append(
-                f"Índice de ativos '{index_name}' retornou {returned_count} documento(s), "
-                f"mas a consulta disponibilizou apenas {len(documents)} para validação."
-            )
-            return
-
-        self._validate_mapping(index_name, expected_mapping, errors, details)
+        self._validate_mappings_for_documents(
+            documents,
+            expected_mapping,
+            errors,
+            details,
+        )
         self._validate_current_asset_documents(
             index_name,
-            returned_count,
             documents,
             timestamp_field,
             errors,
@@ -579,7 +576,6 @@ class ProductDataValidator:
     def _validate_current_asset_documents(
         self,
         index_name: str,
-        returned_count: int,
         documents: list[dict[str, Any]],
         timestamp_field: str,
         errors: list[str],
@@ -603,9 +599,34 @@ class ProductDataValidator:
 
         details.append(
             f"Índice '{index_name}' | busca por {timestamp_field} em "
-            f"{self._reference_date.isoformat()} retornou {returned_count} documento(s); "
-            f"{len(documents)} documento(s) foram validados."
+            f"{self._reference_date.isoformat()} retornou {len(documents)} documento(s), "
+            "todos validados."
         )
+
+    def _validate_mappings_for_documents(
+        self,
+        documents: list[dict[str, Any]],
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida o mapping de cada índice físico identificado nos documentos."""
+        indexes_from_documents: set[str] = set()
+        for position, document in enumerate(documents, start=1):
+            document_index = document.get("_index")
+            if not isinstance(document_index, str) or not document_index:
+                errors.append(
+                    f"Documento {position} da busca de ativos não retornou o nome do índice (_index)."
+                )
+                continue
+            indexes_from_documents.add(document_index)
+
+        if not indexes_from_documents:
+            errors.append("A busca de ativos não retornou nome de índice em nenhum documento.")
+            return
+
+        for document_index in sorted(indexes_from_documents):
+            self._validate_mapping(document_index, expected_mapping, errors, details)
 
     def _validate_mapping(
         self,
