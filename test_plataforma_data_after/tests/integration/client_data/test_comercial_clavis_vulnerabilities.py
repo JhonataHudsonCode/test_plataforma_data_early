@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import allure
 import pytest
@@ -19,7 +20,12 @@ from src.validators.after_pipeline.product_data_validator import ProductDataVali
 
 
 def _save_client_report(report: ClientValidationReport, test_name: str) -> None:
-    report_path = f"reports/client-validation/{test_name}.txt"
+    report_path = (
+        Path(__file__).resolve().parents[3]
+        / "reports"
+        / "client-validation"
+        / f"{test_name}.txt"
+    )
     report.write(
         report_path,
         ClientValidationReport.allure_title_from_source(__file__, test_name),
@@ -28,7 +34,7 @@ def _save_client_report(report: ClientValidationReport, test_name: str) -> None:
     report.close()
     ClientValidationReport.write_html_from_text(
         report_path,
-        report_path.removesuffix(".txt") + ".html",
+        report_path.with_suffix(".html"),
     )
 
 

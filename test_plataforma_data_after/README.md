@@ -164,19 +164,19 @@ pytest -m postgres
 Os resultados são gravados automaticamente em:
 
 ```text
-reports/allure-results
+allure-results
 ```
 
 Para abrir:
 
 ```bash
-allure serve reports/allure-results
+allure serve allure-results
 ```
 
 Ou gerar HTML:
 
 ```bash
-allure generate reports/allure-results -o reports/allure-report --clean
+allure generate allure-results -o reports/allure-report --clean
 ```
 
 > `allure-pytest` gera os arquivos de resultado. Para abrir/gerar o HTML é necessário ter o Allure CLI instalado na máquina/agente.
