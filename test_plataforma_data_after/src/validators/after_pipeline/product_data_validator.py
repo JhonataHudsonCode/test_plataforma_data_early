@@ -610,8 +610,10 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Valida o mapping de cada índice físico identificado nos documentos."""
+        """Valida o mapping do OpenSearch e o `_source` de todos os documentos."""
         indexes_from_documents: set[str] = set()
+        validated_documents_by_index: dict[str, int] = {}
+        mapping_validator = OpenSearchMappingValidator()
         for position, document in enumerate(documents, start=1):
             document_index = document.get("_index")
             if not isinstance(document_index, str) or not document_index:
@@ -621,12 +623,32 @@ class ProductDataValidator:
                 continue
             indexes_from_documents.add(document_index)
 
+            source = self._source(document)
+            document_mapping_errors = mapping_validator.validate_document(
+                source,
+                expected_mapping,
+            )
+            if document_mapping_errors:
+                errors.extend(
+                    f"Índice '{document_index}' | documento {position} | "
+                    f"mapping inválido: {error}"
+                    for error in document_mapping_errors
+                )
+                continue
+            validated_documents_by_index[document_index] = (
+                validated_documents_by_index.get(document_index, 0) + 1
+            )
+
         if not indexes_from_documents:
             errors.append("A busca de ativos não retornou nome de índice em nenhum documento.")
             return
 
         for document_index in sorted(indexes_from_documents):
             self._validate_mapping(document_index, expected_mapping, errors, details)
+            details.append(
+                f"Índice '{document_index}' | mapping estrutural validado em "
+                f"{validated_documents_by_index.get(document_index, 0)} documento(s)."
+            )
 
     def _validate_mapping(
         self,
