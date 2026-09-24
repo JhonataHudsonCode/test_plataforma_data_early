@@ -110,7 +110,7 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
-        self._validate_dated_asset_indices(
+        self._validate_current_asset_index(
             target.client_id,
             "@timestamp",
             EXPECTED_CLIENT_ASSET_MAPPING,
@@ -530,7 +530,7 @@ class ProductDataValidator:
             f"{metadata.created_at.isoformat()}."
         )
 
-    def _validate_dated_asset_indices(
+    def _validate_current_asset_index(
         self,
         client_id: str,
         timestamp_field: str,
@@ -538,31 +538,32 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        index_prefix = f"{client_id}_asset-"
+        index_name = f"{client_id}_asset"
         try:
-            index_names = self._repository.get_index_names_for_dates(
-                index_prefix,
-                (self._reference_date,),
+            documents = self._repository.get_documents_by_date_match(
+                index_name,
+                self._reference_date,
+                timestamp_field,
             )
         except Exception as error:
             errors.append(
-                f"Índices de ativos com prefixo '{index_prefix}' | erro ao localizar "
-                f"a data {self._reference_date.isoformat()}: "
+                f"Índice de ativos '{index_name}' | erro ao consultar documentos de "
+                f"{self._reference_date.isoformat()}: "
                 f"{error.__class__.__name__}: {error}"
             )
             return
 
-        current_index_name = index_names.get(self._reference_date)
-        if current_index_name is None:
+        if not documents:
             errors.append(
-                f"Índice de ativos não encontrado para o prefixo '{index_prefix}' e data "
-                f"{self._reference_date.isoformat()}."
+                f"Índice de ativos '{index_name}' não retornou documentos com "
+                f"{timestamp_field} em {self._reference_date.isoformat()}."
             )
             return
 
-        self._validate_mapping(current_index_name, expected_mapping, errors, details)
+        self._validate_mapping(index_name, expected_mapping, errors, details)
         self._validate_current_asset_documents(
-            current_index_name,
+            index_name,
+            documents,
             timestamp_field,
             errors,
             details,
@@ -571,27 +572,12 @@ class ProductDataValidator:
     def _validate_current_asset_documents(
         self,
         index_name: str,
+        documents: list[dict[str, Any]],
         timestamp_field: str,
         errors: list[str],
         details: list[str],
     ) -> None:
         """Garante que todos os documentos do índice diário pertençam a hoje."""
-        try:
-            index = self._get_available_index(index_name, errors)
-            if index is None:
-                return
-            documents = self._repository.get_documents(index.name, timestamp_field)
-        except Exception as error:
-            errors.append(
-                f"Índice '{index_name}' | erro ao consultar documentos: "
-                f"{error.__class__.__name__}: {error}"
-            )
-            return
-
-        if not documents:
-            errors.append(f"Índice '{index.name}' não retornou documentos.")
-            return
-
         invalid_timestamps: list[str] = []
         for document in documents:
             timestamp = self._source(document).get(timestamp_field)
@@ -601,15 +587,15 @@ class ProductDataValidator:
 
         if invalid_timestamps:
             errors.append(
-                f"Índice '{index.name}' | {len(invalid_timestamps)} de "
+                f"Índice '{index_name}' | {len(invalid_timestamps)} de "
                 f"{len(documents)} documento(s) possuem {timestamp_field} diferente de "
                 f"{self._reference_date.isoformat()}: {', '.join(invalid_timestamps)}."
             )
             return
 
         details.append(
-            f"Índice '{index.name}' | {index.document_count} documento(s) no índice; "
-            f"{len(documents)} documento(s) retornados com {timestamp_field} de hoje."
+            f"Índice '{index_name}' | {len(documents)} documento(s) retornados com "
+            f"{timestamp_field} de hoje."
         )
 
     def _validate_mapping(

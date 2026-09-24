@@ -54,7 +54,7 @@ def _assert_validation(
     report.assert_no_failures()
 
 
-@allure.title("Validar índice diário {cliente}_asset-{data atual}")
+@allure.title("Validar índice {cliente}_asset com documentos da data atual")
 @pytest.mark.integration
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
