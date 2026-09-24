@@ -540,7 +540,7 @@ class ProductDataValidator:
     ) -> None:
         index_name = f"{client_id}_asset"
         try:
-            documents = self._repository.get_documents_by_date_match(
+            returned_count, documents = self._repository.get_documents_by_date_match(
                 index_name,
                 self._reference_date,
                 timestamp_field,
@@ -559,10 +559,17 @@ class ProductDataValidator:
                 f"{timestamp_field} em {self._reference_date.isoformat()}."
             )
             return
+        if returned_count != len(documents):
+            errors.append(
+                f"Índice de ativos '{index_name}' retornou {returned_count} documento(s), "
+                f"mas a consulta disponibilizou apenas {len(documents)} para validação."
+            )
+            return
 
         self._validate_mapping(index_name, expected_mapping, errors, details)
         self._validate_current_asset_documents(
             index_name,
+            returned_count,
             documents,
             timestamp_field,
             errors,
@@ -572,6 +579,7 @@ class ProductDataValidator:
     def _validate_current_asset_documents(
         self,
         index_name: str,
+        returned_count: int,
         documents: list[dict[str, Any]],
         timestamp_field: str,
         errors: list[str],
@@ -594,8 +602,9 @@ class ProductDataValidator:
             return
 
         details.append(
-            f"Índice '{index_name}' | {len(documents)} documento(s) retornados com "
-            f"{timestamp_field} de hoje."
+            f"Índice '{index_name}' | busca por {timestamp_field} em "
+            f"{self._reference_date.isoformat()} retornou {returned_count} documento(s); "
+            f"{len(documents)} documento(s) foram validados."
         )
 
     def _validate_mapping(
