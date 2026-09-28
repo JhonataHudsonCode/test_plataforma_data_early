@@ -110,16 +110,24 @@ class ProductDataValidator:
         return errors, details
 
     def validate_compliance(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(
-            target,
-            "has_wazuh",
-            (("asset-compliance", "@timestamp"), ("asset-policy-compliance", "@timestamp")),
-            validate_creation_date=True,
-            expected_mappings={
-                "asset-compliance": EXPECTED_ASSET_COMPLIANCE_MAPPING,
-                "asset-policy-compliance": EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
-            },
-        )
+        client, errors, details = self._get_applicable_client(target, "has_wazuh")
+        if client is None:
+            return errors, details
+
+        compliance_mappings = {
+            "asset-compliance": EXPECTED_ASSET_COMPLIANCE_MAPPING,
+            "asset-policy-compliance": EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+        }
+        for suffix, expected_mapping in compliance_mappings.items():
+            self._validate_documents_by_reference_date(
+                f"{target.client_id}_{suffix}",
+                "@timestamp",
+                expected_mapping,
+                errors,
+                details,
+                validate_creation_date=True,
+            )
+        return errors, details
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         return self._validate_module_indices(
@@ -497,11 +505,20 @@ class ProductDataValidator:
         details: list[str],
     ) -> None:
         """Valida somente a data de criação do índice já encontrado."""
+        self._validate_index_name_creation_date(index.name, errors, details)
+
+    def _validate_index_name_creation_date(
+        self,
+        index_name: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida a data de criação de um índice físico retornado pela busca."""
         try:
-            metadata = self._repository.get_index_metadata(index.name)
+            metadata = self._repository.get_index_metadata(index_name)
         except Exception as error:
             errors.append(
-                f"Índice '{index.name}' | erro ao consultar data de criação: "
+                f"Índice '{index_name}' | erro ao consultar data de criação: "
                 f"{error.__class__.__name__}: {error}"
             )
             return
@@ -509,14 +526,14 @@ class ProductDataValidator:
         creation_date = metadata.created_at.date()
         if creation_date != self._reference_date:
             errors.append(
-                f"Índice '{index.name}' | criado em {metadata.created_at.isoformat()}; "
+                f"Índice '{index_name}' | criado em {metadata.created_at.isoformat()}; "
                 f"último dia encontrado: {creation_date.isoformat()}; "
                 f"esperado {self._reference_date.isoformat()}."
             )
             return
 
         details.append(
-            f"Índice '{index.name}' | creation_date validado: "
+            f"Índice '{index_name}' | creation_date validado: "
             f"{metadata.created_at.isoformat()}."
         )
 
@@ -563,6 +580,57 @@ class ProductDataValidator:
             details,
         )
 
+    def _validate_documents_by_reference_date(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+        validate_creation_date: bool = False,
+    ) -> None:
+        """Busca diretamente os documentos de hoje, sem resolver o índice por alias."""
+        try:
+            documents = self._repository.get_documents_by_date_match(
+                index_name,
+                self._reference_date,
+                timestamp_field,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos de "
+                f"{self._reference_date.isoformat()}: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        if not documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com "
+                f"{timestamp_field} em {self._reference_date.isoformat()}."
+            )
+            return
+
+        self._validate_mappings_for_documents(
+            documents,
+            expected_mapping,
+            errors,
+            details,
+        )
+        self._validate_current_asset_documents(
+            index_name,
+            documents,
+            timestamp_field,
+            errors,
+            details,
+        )
+        if validate_creation_date:
+            self._validate_document_indexes_creation_date(
+                documents,
+                errors,
+                details,
+            )
+
     def _validate_current_asset_documents(
         self,
         index_name: str,
@@ -596,6 +664,22 @@ class ProductDataValidator:
             "todos validados."
         )
 
+    def _validate_document_indexes_creation_date(
+        self,
+        documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida a criação de cada índice físico que retornou documentos."""
+        for document_index in sorted(
+            {
+                document["_index"]
+                for document in documents
+                if isinstance(document.get("_index"), str) and document["_index"]
+            }
+        ):
+            self._validate_index_name_creation_date(document_index, errors, details)
+
     def _validate_mappings_for_documents(
         self,
         documents: list[dict[str, Any]],
@@ -612,7 +696,7 @@ class ProductDataValidator:
             document_id = str(document.get("_id", "não informado"))
             if not isinstance(document_index, str) or not document_index:
                 errors.append(
-                    f"Documento {position} (_id={document_id}) da busca de ativos não "
+                    f"Documento {position} (_id={document_id}) da busca não "
                     "retornou o nome do índice (_index)."
                 )
                 continue
