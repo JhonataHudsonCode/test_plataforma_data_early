@@ -582,6 +582,7 @@ class ProductDataValidator:
         details: list[str],
     ) -> None:
         index_name = f"{client_id}_asset"
+        document_errors = _CategorizedMessages(errors, "Documentos de hoje")
         try:
             documents = self._repository.get_documents_by_date_match(
                 index_name,
@@ -589,7 +590,7 @@ class ProductDataValidator:
                 timestamp_field,
             )
         except Exception as error:
-            errors.append(
+            document_errors.append(
                 f"Índice de ativos '{index_name}' | erro ao consultar documentos de "
                 f"{self._reference_date.isoformat()}: "
                 f"{error.__class__.__name__}: {error}"
@@ -597,23 +598,34 @@ class ProductDataValidator:
             return
 
         if not documents:
-            errors.append(
+            document_errors.append(
                 f"Índice de ativos '{index_name}' não retornou documentos com "
                 f"{timestamp_field} em {self._reference_date.isoformat()}."
             )
             return
-        self._validate_mappings_for_documents(
-            documents,
-            expected_mapping,
+        self._run_validation_stage(
+            "Mapping",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                group_errors_by_document=True,
+            ),
         )
-        self._validate_current_asset_documents(
-            index_name,
-            documents,
-            timestamp_field,
+        self._run_validation_stage(
+            "Documentos de hoje",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_current_asset_documents(
+                index_name,
+                documents,
+                timestamp_field,
+                stage_errors,
+                stage_details,
+            ),
         )
 
     def _validate_documents_by_reference_date(
@@ -702,7 +714,7 @@ class ProductDataValidator:
         elif index_name.endswith("_asset-policy-compliance"):
             document_validator = self._asset_policy_compliance_document_validator.validate
         documents = [*current_documents, *previous_documents]
-        self._run_compliance_stage(
+        self._run_validation_stage(
             "Mapping",
             errors,
             details,
@@ -715,7 +727,7 @@ class ProductDataValidator:
                 group_errors_by_document=True,
             ),
         )
-        self._run_compliance_stage(
+        self._run_validation_stage(
             "Geral",
             errors,
             details,
@@ -725,7 +737,7 @@ class ProductDataValidator:
                 stage_details,
             ),
         )
-        self._run_compliance_stage(
+        self._run_validation_stage(
             "Geral",
             errors,
             details,
@@ -739,7 +751,7 @@ class ProductDataValidator:
             ),
         )
 
-        self._run_compliance_stage(
+        self._run_validation_stage(
             "Geral",
             errors,
             details,
@@ -762,7 +774,7 @@ class ProductDataValidator:
 
         fields = tuple(field for field, _ in variation_rules)
         totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
-        self._run_compliance_stage(
+        self._run_validation_stage(
             "Geral",
             errors,
             details,
@@ -787,7 +799,7 @@ class ProductDataValidator:
         )
         if not valid_rules:
             return
-        self._run_compliance_stage(
+        self._run_validation_stage(
             "Comparação percentual",
             errors,
             details,
@@ -802,7 +814,7 @@ class ProductDataValidator:
             ),
         )
 
-    def _run_compliance_stage(
+    def _run_validation_stage(
         self,
         category: str,
         errors: list[str],
