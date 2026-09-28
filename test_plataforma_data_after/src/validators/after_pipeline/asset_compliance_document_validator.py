@@ -17,8 +17,18 @@ class AssetComplianceDocumentValidator:
         assert isinstance(checks_definition, dict)
         items_definition = checks_definition["items"]
         assert isinstance(items_definition, dict)
+        compliance_definition = items_definition["compliance"]
+        assert isinstance(compliance_definition, dict)
+        rules_definition = items_definition["rules"]
+        assert isinstance(rules_definition, dict)
 
-        self._items_definition = items_definition
+        self._compliance_definition = compliance_definition
+        self._rules_definition = rules_definition
+        self._items_definition = {
+            name: definition
+            for name, definition in items_definition.items()
+            if name not in {"compliance", "rules"}
+        }
         self._document_definition = {
             **EXPECTED_ASSET_COMPLIANCE_MAPPING,
             "checks": {
@@ -54,6 +64,66 @@ class AssetComplianceDocumentValidator:
                 for error in self._mapping_validator.validate_document(
                     item,
                     self._items_definition,
+                )
+            )
+            errors.extend(self._validate_compliance_items(item, item_path))
+            errors.extend(self._validate_rule_items(item, item_path))
+        return errors
+
+    def _validate_compliance_items(
+        self,
+        item: Mapping[str, Any],
+        item_path: str,
+    ) -> list[str]:
+        """Valida todos os objetos de compliance presentes em um item do check."""
+        compliance = item.get("compliance")
+        if isinstance(compliance, Mapping):
+            compliance_items = [compliance]
+        elif isinstance(compliance, list):
+            compliance_items = compliance
+        else:
+            return [f"Campo lista inválido no documento: {item_path}.compliance"]
+
+        errors: list[str] = []
+        for position, compliance_item in enumerate(compliance_items, start=1):
+            compliance_path = f"{item_path}.compliance[{position}]"
+            if not isinstance(compliance_item, Mapping):
+                errors.append(f"Item inválido no documento: {compliance_path}")
+                continue
+            errors.extend(
+                f"{compliance_path} | {error}"
+                for error in self._mapping_validator.validate_document(
+                    compliance_item,
+                    self._compliance_definition,
+                )
+            )
+        return errors
+
+    def _validate_rule_items(
+        self,
+        item: Mapping[str, Any],
+        item_path: str,
+    ) -> list[str]:
+        """Valida todos os objetos de rules presentes em um item do check."""
+        rules = item.get("rules")
+        if isinstance(rules, Mapping):
+            rule_items = [rules]
+        elif isinstance(rules, list):
+            rule_items = rules
+        else:
+            return [f"Campo lista inválido no documento: {item_path}.rules"]
+
+        errors: list[str] = []
+        for position, rule_item in enumerate(rule_items, start=1):
+            rule_path = f"{item_path}.rules[{position}]"
+            if not isinstance(rule_item, Mapping):
+                errors.append(f"Item inválido no documento: {rule_path}")
+                continue
+            errors.extend(
+                f"{rule_path} | {error}"
+                for error in self._mapping_validator.validate_document(
+                    rule_item,
+                    self._rules_definition,
                 )
             )
         return errors
