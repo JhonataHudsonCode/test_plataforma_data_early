@@ -266,9 +266,12 @@ class ClientValidationReport:
             if not clients:
                 return f'<p class="empty">{escape(empty)}</p>'
             return "".join(
-                f'<details class="card {tone}"><summary>{escape(client_id)}</summary><ul>'
-                + "".join(f"<li>{ClientValidationReport._render_message(message)}</li>" for message in messages)
-                + "</ul></details>"
+                f'<details class="card {tone}"><summary>{escape(client_id)}</summary>'
+                + ClientValidationReport._render_categorized_messages(
+                    messages,
+                    "Falha" if section == "Falhas" else "Informativo" if section == "Informativos" else "Sucesso",
+                )
+                + "</details>"
                 for client_id, messages in clients
             )
 
@@ -276,7 +279,7 @@ class ClientValidationReport:
         html = f"""<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)}</title><style>
-body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.panel{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid}}.metric b{{display:block;font-size:30px}}.fail{{border-color:#b42318}}.info{{border-color:#9a6700}}.pass{{border-color:#16734a}}.panel{{padding:20px;margin-top:16px}}details summary{{cursor:pointer;font-weight:bold;font-size:16px}}.card{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:10px 0;padding:12px 14px}}.empty{{color:#64717d;font-style:italic}}pre{{white-space:pre-wrap;background:#f7f9fb;border-left:4px solid #7591a7;padding:14px}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}
+body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.panel{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid}}.metric b{{display:block;font-size:30px}}.fail{{border-color:#b42318}}.info{{border-color:#9a6700}}.pass{{border-color:#16734a}}.panel{{padding:20px;margin-top:16px}}details summary{{cursor:pointer;font-weight:bold;font-size:16px}}.card{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:10px 0;padding:12px 14px}}.subtest{{border:1px solid #dfe5ea;border-left:3px solid #7591a7;border-radius:5px;margin:9px 0;padding:9px 11px;background:#fafcfd}}.subtest ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}pre{{white-space:pre-wrap;background:#f7f9fb;border-left:4px solid #7591a7;padding:14px}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}
 </style></head><body><main><header><small>RELATÓRIO DE VALIDAÇÃO POR CLIENTE</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Gerado em {generated_at} · Duração: {escape(duration)}</p></header>
 <section class="grid"><div class="metric fail">FALHAS<b>{counts['Falhas']}</b></div><div class="metric info">INFORMATIVOS<b>{counts['Informativos']}</b></div><div class="metric pass">APROVADOS<b>{counts['Aprovados']}</b></div></section>
 <section class="panel"><h2>BDD executado</h2><pre>{escape(bdd)}</pre></section>
@@ -338,12 +341,12 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
                 return '<p class="empty">Nenhum registro.</p>'
             return "".join(
                 f'<details class="client" style="border-left-color:{color};background:{background}">'
-                f'<summary>{escape(client_id)}</summary><ul>'
-                + "".join(
-                    f"<li>{ClientValidationReport._render_message(message)}</li>"
-                    for message in messages
+                f'<summary>{escape(client_id)}</summary>'
+                + ClientValidationReport._render_categorized_messages(
+                    messages,
+                    "Falha" if section == "Falhas" else "Informativo" if section == "Informativos" else "Sucesso",
                 )
-                + "</ul></details>"
+                + "</details>"
                 for client_id, messages in clients
             )
 
@@ -363,7 +366,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             for section, (color, _) in tones.items()
         )
         return f'''<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>{escape(title)}</title><style>
-body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''
+body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}.subtest{{border:1px solid #dfe5ea;border-left:3px solid #7591a7;border-radius:5px;margin:9px 0;padding:9px 11px;background:#fafcfd}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''
 
     @staticmethod
     def _bdd_from_report(report: str) -> str:
@@ -481,6 +484,32 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
                 f"{escape(document)}</summary><ul>{rendered_errors}</ul></details>"
             )
         return ClientValidationReport._render_plain_message(message)
+
+    @staticmethod
+    def _render_categorized_messages(messages: list[str], status: str) -> str:
+        """Agrupa mensagens marcadas por etapa em blocos expansíveis do relatório."""
+        categories: dict[str, list[str]] = {}
+        for message in messages:
+            category, content = ClientValidationReport._split_message_category(message)
+            categories.setdefault(category, []).append(content)
+
+        return "".join(
+            f'<details class="subtest"><summary>{escape(category)} — {escape(status)} '
+            f'({len(category_messages)})</summary><ul>'
+            + "".join(
+                f"<li>{ClientValidationReport._render_message(message)}</li>"
+                for message in category_messages
+            )
+            + "</ul></details>"
+            for category, category_messages in categories.items()
+        )
+
+    @staticmethod
+    def _split_message_category(message: str) -> tuple[str, str]:
+        category = re.match(r"^\[([^\]]+)\]\s*(.*)$", message, flags=re.DOTALL)
+        if category is None:
+            return "Geral", message
+        return category.group(1), category.group(2)
 
     @staticmethod
     def _render_plain_message(message: str) -> str:

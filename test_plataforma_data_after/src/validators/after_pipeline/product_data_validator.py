@@ -54,6 +54,20 @@ class _IndexDocuments:
     previous: dict[str, Any] | None
 
 
+class _CategorizedMessages:
+    """Encaminha mensagens ao report preservando a etapa que as produziu."""
+
+    def __init__(self, messages: list[str], category: str) -> None:
+        self._messages = messages
+        self._category = category
+
+    def append(self, message: str) -> None:
+        self._messages.append(f"[{self._category}] {message}")
+
+    def extend(self, messages: Iterable[str]) -> None:
+        self._messages.extend(f"[{self._category}] {message}" for message in messages)
+
+
 class ProductDataValidator:
     """Valida a aplicação do módulo no Cognito e a atualização de seus índices."""
 
@@ -663,86 +677,109 @@ class ProductDataValidator:
     ) -> None:
         """Compara os totais de compliance de hoje e ontem pelo `end_scan`."""
         previous_date = self._reference_date - timedelta(days=1)
+        query_errors = _CategorizedMessages(errors, "Consulta por end_scan")
         current_documents = self._get_documents_by_timestamp_match(
             index_name,
             self._reference_date,
-            errors,
+            query_errors,
             timestamp_field="end_scan",
         )
         previous_documents = self._get_documents_by_timestamp_match(
             index_name,
             previous_date,
-            errors,
+            query_errors,
             timestamp_field="end_scan",
         )
         if current_documents is None or previous_documents is None:
             return
+        details.append(
+            "[Consulta por end_scan] Consultas de hoje e ontem concluídas com sucesso."
+        )
 
         document_validator = None
         if index_name.endswith("_asset-compliance"):
             document_validator = self._asset_compliance_document_validator.validate
         elif index_name.endswith("_asset-policy-compliance"):
             document_validator = self._asset_policy_compliance_document_validator.validate
-        self._validate_mappings_for_documents(
-            [*current_documents, *previous_documents],
-            expected_mapping,
+        documents = [*current_documents, *previous_documents]
+        self._run_compliance_stage(
+            "Mapping",
             errors,
             details,
-            document_validator=document_validator,
-            group_errors_by_document=True,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                document_validator=document_validator,
+                group_errors_by_document=True,
+            ),
         )
-        self._validate_document_indexes_creation_date(
-            [*current_documents, *previous_documents],
+        self._run_compliance_stage(
+            "Creation date",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_document_indexes_creation_date(
+                documents,
+                stage_errors,
+                stage_details,
+            ),
         )
-        self._validate_documents_for_date(
-            index_name,
-            current_documents,
-            "end_scan",
-            self._reference_date,
+        self._run_compliance_stage(
+            "End scan",
             errors,
             details,
-        )
-        self._validate_documents_for_date(
-            index_name,
-            previous_documents,
-            "end_scan",
-            previous_date,
-            errors,
-            details,
+            lambda stage_errors, stage_details: self._validate_compliance_end_scan_dates(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
         )
 
-        if len(current_documents) != len(previous_documents):
-            errors.append(
-                f"Índice '{index_name}' | quantidade de documentos divergente: "
-                f"{self._reference_date.isoformat()}={len(current_documents)}; "
-                f"{previous_date.isoformat()}={len(previous_documents)}."
-            )
+        self._run_compliance_stage(
+            "Quantidade de documentos",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_document_count(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
         if not current_documents or not previous_documents:
-            missing_date = (
-                self._reference_date if not current_documents else previous_date
-            )
+            missing_date = self._reference_date if not current_documents else previous_date
             errors.append(
-                f"Índice '{index_name}' não retornou documentos com end_scan em "
-                f"{missing_date.isoformat()} para calcular a variação diária."
+                f"[Quantidade de documentos] Índice '{index_name}' não retornou documentos "
+                f"com end_scan em {missing_date.isoformat()} para calcular a variação diária."
             )
             return
 
         fields = tuple(field for field, _ in variation_rules)
-        current_totals, current_invalid_fields = self._sum_document_fields(
-            index_name,
-            current_documents,
-            fields,
+        totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
+        self._run_compliance_stage(
+            "Captação de valores",
             errors,
+            details,
+            lambda stage_errors, stage_details: totals.update(
+                self._capture_compliance_totals(
+                    index_name,
+                    current_documents,
+                    previous_documents,
+                    fields,
+                    stage_errors,
+                    stage_details,
+                )
+            ),
         )
-        previous_totals, previous_invalid_fields = self._sum_document_fields(
-            index_name,
-            previous_documents,
-            fields,
-            errors,
-        )
-        invalid_fields = current_invalid_fields | previous_invalid_fields
+        if not totals:
+            return
+        current_totals, previous_totals, invalid_fields = totals["totals"]
         valid_rules = tuple(
             (field, direction)
             for field, direction in variation_rules
@@ -750,22 +787,95 @@ class ProductDataValidator:
         )
         if not valid_rules:
             return
-
-        details.append(
-            f"Índice '{index_name}' | soma de {len(current_documents)} documento(s) "
-            f"em {self._reference_date.isoformat()} comparada com "
-            f"{len(previous_documents)} documento(s) em {previous_date.isoformat()}, "
-            "usando end_scan."
-        )
-        self._validate_directional_fifty_percent_variation(
-            index_name,
-            tuple(
-                (field, current_totals[field], previous_totals[field], direction)
-                for field, direction in valid_rules
-            ),
+        self._run_compliance_stage(
+            "Comparação percentual",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_directional_fifty_percent_variation(
+                index_name,
+                tuple(
+                    (field, current_totals[field], previous_totals[field], direction)
+                    for field, direction in valid_rules
+                ),
+                stage_errors,
+                stage_details,
+            ),
         )
+
+    def _run_compliance_stage(
+        self,
+        category: str,
+        errors: list[str],
+        details: list[str],
+        validation: Callable[[_CategorizedMessages, _CategorizedMessages], None],
+    ) -> None:
+        """Executa uma subvalidação e registra explicitamente seu sucesso no report."""
+        initial_error_count = len(errors)
+        validation(
+            _CategorizedMessages(errors, category),
+            _CategorizedMessages(details, category),
+        )
+        if len(errors) == initial_error_count:
+            details.append(f"[{category}] Validação concluída com sucesso.")
+
+    def _validate_compliance_end_scan_dates(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        self._validate_documents_for_date(
+            index_name, current_documents, "end_scan", self._reference_date, errors, details
+        )
+        self._validate_documents_for_date(
+            index_name, previous_documents, "end_scan", previous_date, errors, details
+        )
+
+    def _validate_document_count(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if len(current_documents) != len(previous_documents):
+            errors.append(
+                f"Índice '{index_name}' | quantidade de documentos divergente: "
+                f"{self._reference_date.isoformat()}={len(current_documents)}; "
+                f"{previous_date.isoformat()}={len(previous_documents)}."
+            )
+            return
+        details.append(
+            f"Índice '{index_name}' | quantidade de documentos equivalente: "
+            f"{len(current_documents)} em cada data."
+        )
+
+    def _capture_compliance_totals(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        fields: tuple[str, ...],
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, tuple[dict[str, float], dict[str, float], set[str]]]:
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name, current_documents, fields, errors
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name, previous_documents, fields, errors
+        )
+        invalid_fields = current_invalid_fields | previous_invalid_fields
+        details.append(
+            f"Índice '{index_name}' | somas captadas em {len(current_documents)} documento(s) "
+            f"de hoje e {len(previous_documents)} de ontem, usando end_scan."
+        )
+        return {"totals": (current_totals, previous_totals, invalid_fields)}
 
     def _get_documents_by_timestamp_match(
         self,
