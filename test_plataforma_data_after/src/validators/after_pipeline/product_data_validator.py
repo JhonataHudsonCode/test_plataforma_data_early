@@ -577,7 +577,7 @@ class ProductDataValidator:
                 f"{timestamp_field} em {self._reference_date.isoformat()}."
             )
             return
-        self._validate_mappings_for_documents(
+        self._validate_index_mappings_from_documents(
             documents,
             expected_mapping,
             errors,
@@ -888,6 +888,33 @@ class ProductDataValidator:
                 f"{validated_documents_by_index.get(document_index, 0)} documento(s)."
             )
 
+    def _validate_index_mappings_from_documents(
+        self,
+        documents: list[dict[str, Any]],
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Usa o `_index` dos documentos para validar somente `GET /_mapping`."""
+        physical_indexes: set[str] = set()
+        for position, document in enumerate(documents, start=1):
+            document_index = document.get("_index")
+            document_id = str(document.get("_id", "não informado"))
+            if not isinstance(document_index, str) or not document_index:
+                errors.append(
+                    f"Documento {position} (_id={document_id}) da busca não "
+                    "retornou o nome do índice (_index)."
+                )
+                continue
+            physical_indexes.add(document_index)
+
+        if not physical_indexes:
+            errors.append("A busca não retornou nome de índice em nenhum documento.")
+            return
+
+        for document_index in sorted(physical_indexes):
+            self._validate_mapping(document_index, expected_mapping, errors, details)
+
     def _validate_mapping(
         self,
         index_name: str,
@@ -895,9 +922,9 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Compara o mapping efetivo do índice com o contrato do respectivo produto."""
+        """Compara o retorno de `GET /{índice}/_mapping` com o contrato esperado."""
         try:
-            metadata = self._repository.get_index_metadata(index_name)
+            mapping = self._repository.get_index_mapping(index_name)
         except Exception as error:
             errors.append(
                 f"Índice '{index_name}' | erro ao consultar mapping: "
@@ -905,7 +932,7 @@ class ProductDataValidator:
             )
             return
 
-        actual_properties = metadata.mapping.get("properties")
+        actual_properties = mapping.get("properties")
         if not isinstance(actual_properties, dict):
             errors.append(f"Índice '{index_name}' | mapping sem propriedades configuradas.")
             return
