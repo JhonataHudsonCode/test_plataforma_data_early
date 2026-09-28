@@ -895,7 +895,7 @@ class ProductDataValidator:
                 if group_errors_by_document:
                     errors.append(
                         f"{document_prefix} ({len(document_mapping_errors)} erro(s)): "
-                        + " | ".join(document_mapping_errors)
+                        + " || ".join(document_mapping_errors)
                     )
                 else:
                     errors.extend(

@@ -457,6 +457,21 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
     @staticmethod
     def _render_message(message: str) -> str:
         """Escapa a mensagem e converte a notação **texto** em negrito seguro."""
+        if " | mapping inválido (" in message and ": " in message:
+            document, document_errors = message.split(": ", maxsplit=1)
+            rendered_errors = "".join(
+                f"<li>{ClientValidationReport._render_plain_message(error)}</li>"
+                for error in document_errors.split(" || ")
+            )
+            return (
+                '<details class="document-error"><summary>'
+                f"{escape(document)}</summary><ul>{rendered_errors}</ul></details>"
+            )
+        return ClientValidationReport._render_plain_message(message)
+
+    @staticmethod
+    def _render_plain_message(message: str) -> str:
+        """Renderiza uma mensagem textual sem alterar sua estrutura."""
         escaped_message = escape(message)
         return re.sub(
             r"\*\*(.+?)\*\*",
