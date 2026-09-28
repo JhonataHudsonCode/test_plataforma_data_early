@@ -165,7 +165,7 @@ class ClientValidationReport:
     @staticmethod
     def _format_message_line(label: str, message: str) -> str:
         """Usa o cabeçalho do documento como rótulo das falhas de mapping."""
-        if " | mapping inválido (" in message:
+        if re.match(r"^\[[^\]]+\]\s*", message):
             return f"  {message}"
         return f"  {label}: {message}"
 
