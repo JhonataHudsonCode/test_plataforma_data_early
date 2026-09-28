@@ -689,6 +689,7 @@ class ProductDataValidator:
             errors,
             details,
             document_validator=document_validator,
+            group_errors_by_document=True,
         )
         self._validate_document_indexes_creation_date(
             [*current_documents, *previous_documents],
@@ -863,6 +864,7 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
         document_validator: Callable[[dict[str, Any]], list[str]] | None = None,
+        group_errors_by_document: bool = False,
     ) -> None:
         """Valida o mapping do OpenSearch e o `_source` de todos os documentos."""
         indexes_from_documents: set[str] = set()
@@ -886,11 +888,20 @@ class ProductDataValidator:
                 else mapping_validator.validate_document(source, expected_mapping)
             )
             if document_mapping_errors:
-                errors.extend(
-                    f"Índice '{document_index}' | documento {position} (_id={document_id}) | "
-                    f"mapping inválido: {error}"
-                    for error in document_mapping_errors
+                document_prefix = (
+                    f"Índice '{document_index}' | documento {position} "
+                    f"(_id={document_id}) | mapping inválido"
                 )
+                if group_errors_by_document:
+                    errors.append(
+                        f"{document_prefix} ({len(document_mapping_errors)} erro(s)): "
+                        + " | ".join(document_mapping_errors)
+                    )
+                else:
+                    errors.extend(
+                        f"{document_prefix}: {error}"
+                        for error in document_mapping_errors
+                    )
                 continue
             validated_documents_by_index[document_index] = (
                 validated_documents_by_index.get(document_index, 0) + 1
