@@ -114,18 +114,29 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
-        compliance_mappings = {
-            "asset-compliance": EXPECTED_ASSET_COMPLIANCE_MAPPING,
-            "asset-policy-compliance": EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+        compliance_validations = {
+            "asset-compliance": (
+                EXPECTED_ASSET_COMPLIANCE_MAPPING,
+                (
+                    ("fail", "increase"),
+                    ("success", "decrease"),
+                    ("pct_score", "decrease"),
+                    ("total_checks", "decrease"),
+                    ("invalid", "increase"),
+                ),
+            ),
+            "asset-policy-compliance": (
+                EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+                (("passed.count", "decrease"), ("fail.count", "increase")),
+            ),
         }
-        for suffix, expected_mapping in compliance_mappings.items():
-            self._validate_documents_by_reference_date(
+        for suffix, (expected_mapping, variation_rules) in compliance_validations.items():
+            self._validate_compliance_variation(
                 f"{target.client_id}_{suffix}",
-                "@timestamp",
                 expected_mapping,
+                variation_rules,
                 errors,
                 details,
-                validate_creation_date=True,
             )
         return errors, details
 
@@ -631,6 +642,113 @@ class ProductDataValidator:
                 details,
             )
 
+    def _validate_compliance_variation(
+        self,
+        index_name: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        variation_rules: tuple[tuple[str, str], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara os totais de compliance de hoje e ontem pelo `end_scan`."""
+        previous_date = self._reference_date - timedelta(days=1)
+        current_documents = self._get_documents_for_date(
+            index_name,
+            self._reference_date,
+            errors,
+            timestamp_field="end_scan",
+        )
+        previous_documents = self._get_documents_for_date(
+            index_name,
+            previous_date,
+            errors,
+            timestamp_field="end_scan",
+        )
+        if current_documents is None or previous_documents is None:
+            return
+
+        self._validate_mappings_for_documents(
+            [*current_documents, *previous_documents],
+            expected_mapping,
+            errors,
+            details,
+        )
+        self._validate_document_indexes_creation_date(
+            [*current_documents, *previous_documents],
+            errors,
+            details,
+        )
+        self._validate_documents_for_date(
+            index_name,
+            current_documents,
+            "end_scan",
+            self._reference_date,
+            errors,
+            details,
+        )
+        self._validate_documents_for_date(
+            index_name,
+            previous_documents,
+            "end_scan",
+            previous_date,
+            errors,
+            details,
+        )
+
+        if len(current_documents) != len(previous_documents):
+            errors.append(
+                f"Índice '{index_name}' | quantidade de documentos divergente: "
+                f"{self._reference_date.isoformat()}={len(current_documents)}; "
+                f"{previous_date.isoformat()}={len(previous_documents)}."
+            )
+        if not current_documents or not previous_documents:
+            missing_date = (
+                self._reference_date if not current_documents else previous_date
+            )
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com end_scan em "
+                f"{missing_date.isoformat()} para calcular a variação diária."
+            )
+            return
+
+        fields = tuple(field for field, _ in variation_rules)
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name,
+            current_documents,
+            fields,
+            errors,
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name,
+            previous_documents,
+            fields,
+            errors,
+        )
+        invalid_fields = current_invalid_fields | previous_invalid_fields
+        valid_rules = tuple(
+            (field, direction)
+            for field, direction in variation_rules
+            if field not in invalid_fields
+        )
+        if not valid_rules:
+            return
+
+        details.append(
+            f"Índice '{index_name}' | soma de {len(current_documents)} documento(s) "
+            f"em {self._reference_date.isoformat()} comparada com "
+            f"{len(previous_documents)} documento(s) em {previous_date.isoformat()}, "
+            "usando end_scan."
+        )
+        self._validate_directional_fifty_percent_variation(
+            index_name,
+            tuple(
+                (field, current_totals[field], previous_totals[field], direction)
+                for field, direction in valid_rules
+            ),
+            errors,
+            details,
+        )
+
     def _validate_current_asset_documents(
         self,
         index_name: str,
@@ -640,11 +758,30 @@ class ProductDataValidator:
         details: list[str],
     ) -> None:
         """Garante que todos os documentos do índice diário pertençam a hoje."""
+        self._validate_documents_for_date(
+            index_name,
+            documents,
+            timestamp_field,
+            self._reference_date,
+            errors,
+            details,
+        )
+
+    def _validate_documents_for_date(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        timestamp_field: str,
+        expected_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que todos os documentos retornados pertencem à data consultada."""
         invalid_timestamps: list[str] = []
         for document in documents:
             timestamp = self._source(document).get(timestamp_field)
             document_date = self._parse_date(timestamp)
-            if document_date != self._reference_date:
+            if document_date != expected_date:
                 document_id = str(document.get("_id", "não informado"))
                 invalid_timestamps.append(
                     f"_id={document_id}, {timestamp_field}={timestamp or 'não informado'}"
@@ -654,13 +791,13 @@ class ProductDataValidator:
             errors.append(
                 f"Índice '{index_name}' | {len(invalid_timestamps)} de "
                 f"{len(documents)} documento(s) possuem {timestamp_field} diferente de "
-                f"{self._reference_date.isoformat()}: {', '.join(invalid_timestamps)}."
+                f"{expected_date.isoformat()}: {', '.join(invalid_timestamps)}."
             )
             return
 
         details.append(
             f"Índice '{index_name}' | busca por {timestamp_field} em "
-            f"{self._reference_date.isoformat()} retornou {len(documents)} documento(s), "
+            f"{expected_date.isoformat()} retornou {len(documents)} documento(s), "
             "todos validados."
         )
 
@@ -1145,6 +1282,7 @@ class ProductDataValidator:
         index_name: str,
         reference_date: date,
         errors: list[str],
+        timestamp_field: str = "date",
     ) -> list[dict[str, Any]] | None:
         start = datetime.combine(reference_date, datetime.min.time())
         try:
@@ -1152,7 +1290,7 @@ class ProductDataValidator:
                 index_name,
                 start,
                 start + timedelta(days=1),
-                timestamp_field="date",
+                timestamp_field=timestamp_field,
             )
         except Exception as error:
             errors.append(
@@ -1160,6 +1298,55 @@ class ProductDataValidator:
                 f"{reference_date.isoformat()}: {error.__class__.__name__}: {error}"
             )
             return None
+
+    def _validate_directional_fifty_percent_variation(
+        self,
+        index_name: str,
+        fields: tuple[tuple[str, object, object, str], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Aplica limite de 50% no sentido de risco definido para cada campo."""
+        for field_name, current_value, previous_value, direction in fields:
+            current = float(current_value)
+            previous = float(previous_value)
+            if previous < 0 or current < 0:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} não pode possuir "
+                    f"valor negativo (ontem={previous_value}, hoje={current_value})."
+                )
+                continue
+
+            if previous == 0:
+                if direction == "increase" and current > 0:
+                    errors.append(
+                        f"Índice '{index_name}' | total de {field_name} aumentou de 0 "
+                        f"para {current_value}; excede o limite de 50%."
+                    )
+                else:
+                    details.append(
+                        f"Índice '{index_name}' | total de {field_name}: "
+                        f"ontem=0, hoje={current_value}; sem base para variação percentual."
+                    )
+                continue
+
+            variation = (current - previous) / previous
+            details.append(
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
+            )
+            exceeds_limit = (
+                direction == "increase" and variation > 0.5
+            ) or (
+                direction == "decrease" and variation <= -0.5
+            )
+            if exceeds_limit:
+                action = "aumentou" if direction == "increase" else "reduziu"
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} {action} "
+                    f"{abs(variation):.0%} (ontem={previous_value}, hoje={current_value}); "
+                    "limite permitido: 50%."
+                )
 
     def _sum_document_fields(
         self,

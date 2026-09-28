@@ -35,7 +35,7 @@ EXPECTED_ASSET_COMPLIANCE_MAPPING: dict[str, str | dict[str, Any]] = {
     "invalid": "long",
     "name": "text",
     "os": "text",
-    "pct_score": "long",
+    "pct_score": "float",
     "policies": "long",
     "start_scan": "date",
     "success": "long",
