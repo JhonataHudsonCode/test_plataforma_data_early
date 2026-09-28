@@ -979,6 +979,7 @@ class ProductDataValidator:
         """Valida o mapping do OpenSearch e o `_source` de todos os documentos."""
         indexes_from_documents: set[str] = set()
         validated_documents_by_index: dict[str, int] = {}
+        invalid_documents_by_index: dict[str, int] = {}
         mapping_validator = OpenSearchMappingValidator()
         for position, document in enumerate(documents, start=1):
             document_index = document.get("_index")
@@ -998,6 +999,9 @@ class ProductDataValidator:
                 else mapping_validator.validate_document(source, expected_mapping)
             )
             if document_mapping_errors:
+                invalid_documents_by_index[document_index] = (
+                    invalid_documents_by_index.get(document_index, 0) + 1
+                )
                 document_prefix = (
                     f"Índice '{document_index}' | documento {position} "
                     f"(_id={document_id}) | mapping inválido"
@@ -1025,11 +1029,31 @@ class ProductDataValidator:
             return
 
         for document_index in sorted(indexes_from_documents):
-            self._validate_mapping(document_index, expected_mapping, errors, details)
-            details.append(
-                f"Índice '{document_index}' | mapping estrutural validado em "
-                f"{validated_documents_by_index.get(document_index, 0)} documento(s)."
+            mapping_is_valid = self._validate_mapping(
+                document_index,
+                expected_mapping,
+                errors,
+                details,
+                include_success_detail=False,
             )
+            valid_documents = validated_documents_by_index.get(document_index, 0)
+            invalid_documents = invalid_documents_by_index.get(document_index, 0)
+            if not mapping_is_valid:
+                details.append(
+                    f"Índice '{document_index}' | mapping validado com erros no "
+                    "contrato do índice."
+                )
+            elif invalid_documents:
+                details.append(
+                    f"Índice '{document_index}' | mapping validado com erros na "
+                    f"estrutura de {invalid_documents} documento(s); "
+                    f"{valid_documents} documento(s) aprovado(s)."
+                )
+            else:
+                details.append(
+                    f"Índice '{document_index}' | mapping estrutural validado em "
+                    f"{valid_documents} documento(s)."
+                )
 
     @staticmethod
     def _summarize_document_mapping_errors(errors: list[str]) -> list[str]:
@@ -1061,7 +1085,8 @@ class ProductDataValidator:
         expected_mapping: dict[str, str | dict[str, Any]],
         errors: list[str],
         details: list[str],
-    ) -> None:
+        include_success_detail: bool = True,
+    ) -> bool:
         """Compara o mapping efetivo do índice com o contrato do respectivo produto."""
         try:
             metadata = self._repository.get_index_metadata(index_name)
@@ -1070,12 +1095,12 @@ class ProductDataValidator:
                 f"Índice '{index_name}' | erro ao consultar mapping: "
                 f"{error.__class__.__name__}: {error}"
             )
-            return
+            return False
 
         actual_properties = metadata.mapping.get("properties")
         if not isinstance(actual_properties, dict):
             errors.append(f"Índice '{index_name}' | mapping sem propriedades configuradas.")
-            return
+            return False
 
         mapping_errors = OpenSearchMappingValidator().validate(
             actual_properties,
@@ -1086,8 +1111,10 @@ class ProductDataValidator:
                 f"Índice '{index_name}' | mapping inválido: {mapping_error}"
                 for mapping_error in mapping_errors
             )
-            return
-        details.append(f"Índice '{index_name}' | mapping validado com sucesso.")
+            return False
+        if include_success_detail:
+            details.append(f"Índice '{index_name}' | mapping validado com sucesso.")
+        return True
 
     def _validate_dated_index_document(
         self,
