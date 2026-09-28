@@ -677,7 +677,7 @@ class ProductDataValidator:
     ) -> None:
         """Compara os totais de compliance de hoje e ontem pelo `end_scan`."""
         previous_date = self._reference_date - timedelta(days=1)
-        query_errors = _CategorizedMessages(errors, "Consulta por end_scan")
+        query_errors = _CategorizedMessages(errors, "Geral")
         current_documents = self._get_documents_by_timestamp_match(
             index_name,
             self._reference_date,
@@ -693,7 +693,7 @@ class ProductDataValidator:
         if current_documents is None or previous_documents is None:
             return
         details.append(
-            "[Consulta por end_scan] Consultas de hoje e ontem concluídas com sucesso."
+            "[Geral] Consultas de documentos de hoje e ontem por end_scan concluídas com sucesso."
         )
 
         document_validator = None
@@ -716,7 +716,7 @@ class ProductDataValidator:
             ),
         )
         self._run_compliance_stage(
-            "Creation date",
+            "Geral",
             errors,
             details,
             lambda stage_errors, stage_details: self._validate_document_indexes_creation_date(
@@ -726,7 +726,7 @@ class ProductDataValidator:
             ),
         )
         self._run_compliance_stage(
-            "End scan",
+            "Geral",
             errors,
             details,
             lambda stage_errors, stage_details: self._validate_compliance_end_scan_dates(
@@ -740,7 +740,7 @@ class ProductDataValidator:
         )
 
         self._run_compliance_stage(
-            "Quantidade de documentos",
+            "Geral",
             errors,
             details,
             lambda stage_errors, stage_details: self._validate_document_count(
@@ -755,7 +755,7 @@ class ProductDataValidator:
         if not current_documents or not previous_documents:
             missing_date = self._reference_date if not current_documents else previous_date
             errors.append(
-                f"[Quantidade de documentos] Índice '{index_name}' não retornou documentos "
+                f"[Geral] Índice '{index_name}' não retornou documentos "
                 f"com end_scan em {missing_date.isoformat()} para calcular a variação diária."
             )
             return
@@ -763,7 +763,7 @@ class ProductDataValidator:
         fields = tuple(field for field, _ in variation_rules)
         totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
         self._run_compliance_stage(
-            "Captação de valores",
+            "Geral",
             errors,
             details,
             lambda stage_errors, stage_details: totals.update(
@@ -1520,10 +1520,6 @@ class ProductDataValidator:
                 continue
 
             variation = (current - previous) / previous
-            details.append(
-                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
-                f"hoje={current_value}, variação={variation:.0%}."
-            )
             exceeds_limit = (
                 direction == "increase" and variation > 0.5
             ) or (
@@ -1536,6 +1532,11 @@ class ProductDataValidator:
                     f"{abs(variation):.0%} (ontem={previous_value}, hoje={current_value}); "
                     "limite permitido: 50%."
                 )
+                continue
+            details.append(
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
+            )
 
     def _sum_document_fields(
         self,
