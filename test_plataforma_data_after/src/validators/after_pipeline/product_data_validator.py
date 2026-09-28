@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 import re
+from collections.abc import Callable
 from typing import Any, Iterable
 
 from src.config.settings import ClientTarget
@@ -35,6 +36,9 @@ from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 from src.validators.after_pipeline.oto_dashboard.document_validator import (
     OtoDashboardDocumentValidator,
+)
+from src.validators.after_pipeline.asset_compliance_document_validator import (
+    AssetComplianceDocumentValidator,
 )
 from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
 
@@ -71,6 +75,7 @@ class ProductDataValidator:
         self._oto_dashboard_document_validator = OtoDashboardDocumentValidator(
             self._reference_date
         )
+        self._asset_compliance_document_validator = AssetComplianceDocumentValidator()
 
     def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, "has_asset")
@@ -667,11 +672,17 @@ class ProductDataValidator:
         if current_documents is None or previous_documents is None:
             return
 
+        document_validator = (
+            self._asset_compliance_document_validator.validate
+            if index_name.endswith("_asset-compliance")
+            else None
+        )
         self._validate_mappings_for_documents(
             [*current_documents, *previous_documents],
             expected_mapping,
             errors,
             details,
+            document_validator=document_validator,
         )
         self._validate_document_indexes_creation_date(
             [*current_documents, *previous_documents],
@@ -845,6 +856,7 @@ class ProductDataValidator:
         expected_mapping: dict[str, str | dict[str, Any]],
         errors: list[str],
         details: list[str],
+        document_validator: Callable[[dict[str, Any]], list[str]] | None = None,
     ) -> None:
         """Valida o mapping do OpenSearch e o `_source` de todos os documentos."""
         indexes_from_documents: set[str] = set()
@@ -862,9 +874,10 @@ class ProductDataValidator:
             indexes_from_documents.add(document_index)
 
             source = self._source(document)
-            document_mapping_errors = mapping_validator.validate_document(
-                source,
-                expected_mapping,
+            document_mapping_errors = (
+                document_validator(source)
+                if document_validator is not None
+                else mapping_validator.validate_document(source, expected_mapping)
             )
             if document_mapping_errors:
                 errors.extend(
