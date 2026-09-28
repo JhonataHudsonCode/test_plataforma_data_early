@@ -30,12 +30,14 @@ class AssetComplianceDocumentValidator:
             if name not in {"compliance", "rules"}
         }
         self._document_definition = {
-            **EXPECTED_ASSET_COMPLIANCE_MAPPING,
-            "checks": {
-                name: definition
-                for name, definition in checks_definition.items()
-                if name != "items"
-            },
+            name: definition
+            for name, definition in EXPECTED_ASSET_COMPLIANCE_MAPPING.items()
+            if name != "policies"
+        }
+        self._document_definition["checks"] = {
+            name: definition
+            for name, definition in checks_definition.items()
+            if name != "items"
         }
         self._mapping_validator = OpenSearchMappingValidator()
 
@@ -45,6 +47,7 @@ class AssetComplianceDocumentValidator:
             source,
             self._document_definition,
         )
+        errors.extend(self._validate_policies(source))
         checks = source.get("checks")
         if not isinstance(checks, Mapping):
             return errors
@@ -68,6 +71,23 @@ class AssetComplianceDocumentValidator:
             )
             errors.extend(self._validate_compliance_items(item, item_path))
             errors.extend(self._validate_rule_items(item, item_path))
+        return errors
+
+    @staticmethod
+    def _validate_policies(source: Mapping[str, Any]) -> list[str]:
+        """Valida todos os valores long presentes na lista raiz policies."""
+        policies = source.get("policies")
+        if not isinstance(policies, list):
+            return ["Campo lista inválido no documento: policies"]
+
+        errors: list[str] = []
+        for position, policy in enumerate(policies, start=1):
+            if not isinstance(policy, int) or isinstance(policy, bool):
+                errors.append(
+                    "Tipo inválido no documento para "
+                    f"policies[{position}]. Esperado: long; "
+                    f"encontrado: {type(policy).__name__}"
+                )
         return errors
 
     def _validate_compliance_items(

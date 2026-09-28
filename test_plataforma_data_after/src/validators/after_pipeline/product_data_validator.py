@@ -40,6 +40,9 @@ from src.validators.after_pipeline.oto_dashboard.document_validator import (
 from src.validators.after_pipeline.asset_compliance_document_validator import (
     AssetComplianceDocumentValidator,
 )
+from src.validators.after_pipeline.asset_policy_compliance_document_validator import (
+    AssetPolicyComplianceDocumentValidator,
+)
 from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
 
 
@@ -76,6 +79,9 @@ class ProductDataValidator:
             self._reference_date
         )
         self._asset_compliance_document_validator = AssetComplianceDocumentValidator()
+        self._asset_policy_compliance_document_validator = (
+            AssetPolicyComplianceDocumentValidator()
+        )
 
     def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, "has_asset")
@@ -672,11 +678,11 @@ class ProductDataValidator:
         if current_documents is None or previous_documents is None:
             return
 
-        document_validator = (
-            self._asset_compliance_document_validator.validate
-            if index_name.endswith("_asset-compliance")
-            else None
-        )
+        document_validator = None
+        if index_name.endswith("_asset-compliance"):
+            document_validator = self._asset_compliance_document_validator.validate
+        elif index_name.endswith("_asset-policy-compliance"):
+            document_validator = self._asset_policy_compliance_document_validator.validate
         self._validate_mappings_for_documents(
             [*current_documents, *previous_documents],
             expected_mapping,
