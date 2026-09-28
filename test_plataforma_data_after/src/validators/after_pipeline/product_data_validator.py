@@ -893,9 +893,12 @@ class ProductDataValidator:
                     f"(_id={document_id}) | mapping inválido"
                 )
                 if group_errors_by_document:
+                    summarized_errors = self._summarize_document_mapping_errors(
+                        document_mapping_errors
+                    )
                     errors.append(
                         f"{document_prefix} ({len(document_mapping_errors)} erro(s)): "
-                        + " || ".join(document_mapping_errors)
+                        + " || ".join(summarized_errors)
                     )
                 else:
                     errors.extend(
@@ -917,6 +920,30 @@ class ProductDataValidator:
                 f"Índice '{document_index}' | mapping estrutural validado em "
                 f"{validated_documents_by_index.get(document_index, 0)} documento(s)."
             )
+
+    @staticmethod
+    def _summarize_document_mapping_errors(errors: list[str]) -> list[str]:
+        """Agrupa erros iguais que diferem apenas pela posição de arrays do documento."""
+        grouped_errors: dict[str, tuple[str, int]] = {}
+        for error in errors:
+            normalized_error = re.sub(r"\[\d+\]", "[*]", error)
+            first_error, occurrences = grouped_errors.get(normalized_error, (error, 0))
+            grouped_errors[normalized_error] = (first_error, occurrences + 1)
+
+        summarized_errors: list[str] = []
+        for first_error, occurrences in grouped_errors.values():
+            if occurrences == 1:
+                summarized_errors.append(first_error)
+                continue
+            scope = (
+                "posição(ões) de checks.items"
+                if "checks.items[" in first_error
+                else "ocorrência(s) no documento"
+            )
+            summarized_errors.append(
+                f"{first_error} (ocorre em {occurrences} {scope})"
+            )
+        return summarized_errors
 
     def _validate_mapping(
         self,

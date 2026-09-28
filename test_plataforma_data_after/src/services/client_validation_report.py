@@ -115,7 +115,10 @@ class ClientValidationReport:
                 for client_id, messages in clients:
                     lines.append(f"- Cliente: {client_id}")
                     lines.extend(
-                        f"  {label}: {message.removeprefix(f'{label}: ')}"
+                        cls._format_message_line(
+                            label,
+                            message.removeprefix(f"{label}: "),
+                        )
                         for message in messages
                     )
 
@@ -152,9 +155,19 @@ class ClientValidationReport:
             lines.append(f"{title} ({len(clients)}):")
             for client_id, messages in clients:
                 lines.append(f"- Cliente: {client_id}")
-                lines.extend(f"  {label}: {message}" for message in messages)
+                lines.extend(
+                    self._format_message_line(label, message)
+                    for message in messages
+                )
             lines.append("")
         return "\n".join(lines).rstrip()
+
+    @staticmethod
+    def _format_message_line(label: str, message: str) -> str:
+        """Usa o cabeçalho do documento como rótulo das falhas de mapping."""
+        if " | mapping inválido (" in message:
+            return f"  {message}"
+        return f"  {label}: {message}"
 
     def _execution_duration(self) -> str:
         elapsed_seconds = (
