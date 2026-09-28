@@ -855,6 +855,14 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
+        if not current_documents or not previous_documents:
+            errors.append(
+                f"Índice '{index_name}' | quantidade de documentos não pode ser "
+                f"considerada equivalente: {self._reference_date.isoformat()}="
+                f"{len(current_documents)}; {previous_date.isoformat()}="
+                f"{len(previous_documents)}."
+            )
+            return
         if len(current_documents) != len(previous_documents):
             errors.append(
                 f"Índice '{index_name}' | quantidade de documentos divergente: "
