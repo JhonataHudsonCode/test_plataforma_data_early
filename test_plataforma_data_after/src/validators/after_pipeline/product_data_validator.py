@@ -652,13 +652,13 @@ class ProductDataValidator:
     ) -> None:
         """Compara os totais de compliance de hoje e ontem pelo `end_scan`."""
         previous_date = self._reference_date - timedelta(days=1)
-        current_documents = self._get_documents_for_date(
+        current_documents = self._get_documents_by_timestamp_match(
             index_name,
             self._reference_date,
             errors,
             timestamp_field="end_scan",
         )
-        previous_documents = self._get_documents_for_date(
+        previous_documents = self._get_documents_by_timestamp_match(
             index_name,
             previous_date,
             errors,
@@ -748,6 +748,28 @@ class ProductDataValidator:
             errors,
             details,
         )
+
+    def _get_documents_by_timestamp_match(
+        self,
+        index_name: str,
+        reference_date: date,
+        errors: list[str],
+        timestamp_field: str,
+    ) -> list[dict[str, Any]] | None:
+        """Consulta uma data por vez com `match` e data serializada como texto."""
+        try:
+            return self._repository.get_documents_by_date_match(
+                index_name,
+                reference_date,
+                timestamp_field,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos com "
+                f"{timestamp_field} em '{reference_date.isoformat()}': "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return None
 
     def _validate_current_asset_documents(
         self,
