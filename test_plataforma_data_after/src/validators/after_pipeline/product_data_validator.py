@@ -1436,74 +1436,120 @@ class ProductDataValidator:
             return
 
         previous_date = self._reference_date - timedelta(days=1)
+        general_errors = _CategorizedMessages(errors, "Geral")
         current_documents = self._get_documents_for_date(
             index_name,
             self._reference_date,
-            errors,
+            general_errors,
         )
         previous_documents = self._get_documents_for_date(
             index_name,
             previous_date,
-            errors,
+            general_errors,
         )
         if current_documents is None or previous_documents is None:
             return
 
-        # Os documentos podem pertencer a índices físicos diferentes. Valida-se
-        # tanto o mapping de cada índice físico quanto o _source de cada retorno.
-        self._validate_mappings_for_documents(
-            [*current_documents, *previous_documents],
-            expected_mapping,
+        documents = [*current_documents, *previous_documents]
+        self._run_validation_stage(
+            "Mapping",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                group_errors_by_document=True,
+            ),
         )
-        if len(current_documents) != len(previous_documents):
-            errors.append(
-                f"Índice '{index_name}' | quantidade de documentos divergente: "
-                f"{self._reference_date.isoformat()}={len(current_documents)}; "
-                f"{previous_date.isoformat()}={len(previous_documents)}."
-            )
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_document_count(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
         if not current_documents or not previous_documents:
             missing_date = (
                 self._reference_date if not current_documents else previous_date
             )
             errors.append(
-                f"Índice '{index_name}' não retornou documentos em "
+                f"[Geral] Índice '{index_name}' não retornou documentos em "
                 f"{missing_date.isoformat()} para calcular a variação diária."
             )
             return
 
-        current_totals, current_invalid_fields = self._sum_document_fields(
-            index_name,
-            current_documents,
-            fields,
+        totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
+        self._run_validation_stage(
+            "Geral",
             errors,
+            details,
+            lambda stage_errors, stage_details: totals.update(
+                self._capture_asset_history_totals(
+                    index_name,
+                    current_documents,
+                    previous_documents,
+                    fields,
+                    stage_errors,
+                    stage_details,
+                )
+            ),
         )
-        previous_totals, previous_invalid_fields = self._sum_document_fields(
-            index_name,
-            previous_documents,
-            fields,
-            errors,
-        )
-        invalid_fields = current_invalid_fields | previous_invalid_fields
+        if not totals:
+            return
+        current_totals, previous_totals, invalid_fields = totals["totals"]
         valid_fields = tuple(field for field in fields if field not in invalid_fields)
         if not valid_fields:
             return
 
-        details.append(
-            f"Índice '{index_name}' | soma de {len(current_documents)} documento(s) em "
-            f"{self._reference_date.isoformat()} comparada com {len(previous_documents)} "
-            f"documento(s) em {previous_date.isoformat()}."
-        )
-        self._validate_fifty_percent_variation(
-            index_name,
-            tuple(
-                (field, current_totals[field], previous_totals[field])
-                for field in valid_fields
-            ),
+        self._run_validation_stage(
+            "Comparação percentual",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_fifty_percent_variation(
+                index_name,
+                tuple(
+                    (field, current_totals[field], previous_totals[field])
+                    for field in valid_fields
+                ),
+                stage_errors,
+                stage_details,
+            ),
         )
+
+    def _capture_asset_history_totals(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        fields: tuple[str, ...],
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, tuple[dict[str, float], dict[str, float], set[str]]]:
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name, current_documents, fields, errors
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name, previous_documents, fields, errors
+        )
+        details.append(
+            f"Índice '{index_name}' | somas captadas em {len(current_documents)} documento(s) "
+            f"de hoje e {len(previous_documents)} de ontem."
+        )
+        return {
+            "totals": (
+                current_totals,
+                previous_totals,
+                current_invalid_fields | previous_invalid_fields,
+            )
+        }
 
     def _get_documents_for_date(
         self,
@@ -1647,16 +1693,17 @@ class ProductDataValidator:
                 continue
 
             variation = (current - previous) / previous
+            if variation > 0.5:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} aumentou {variation:.0%} "
+                    f"(ontem={previous_value}, hoje={current_value}); "
+                    "máximo permitido: 50%."
+                )
+                continue
             details.append(
                 f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
                 f"hoje={current_value}, variação={variation:.0%}."
             )
-            if variation > 0.5:
-                errors.append(
-                f"Índice '{index_name}' | total de {field_name} aumentou {variation:.0%} "
-                f"(ontem={previous_value}, hoje={current_value}); "
-                    "máximo permitido: 50%."
-                )
 
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
