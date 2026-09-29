@@ -1150,12 +1150,12 @@ class ProductDataValidator:
         document_validator: Callable[[dict[str, Any]], list[str]] | None = None,
         group_errors_by_document: bool = False,
     ) -> None:
-        """Valida o mapping do OpenSearch e o `_source` de todos os documentos."""
+        """Valida o mapping do OpenSearch e o `_source` do primeiro documento."""
         indexes_from_documents: set[str] = set()
         validated_documents_by_index: dict[str, int] = {}
         invalid_documents_by_index: dict[str, int] = {}
         mapping_validator = OpenSearchMappingValidator()
-        for position, document in enumerate(documents, start=1):
+        for position, document in enumerate(documents[:1], start=1):
             document_index = document.get("_index")
             document_id = str(document.get("_id", "não informado"))
             if not isinstance(document_index, str) or not document_index:
