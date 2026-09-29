@@ -305,69 +305,122 @@ class ProductDataValidator:
         errors: list[str],
         details: list[str],
     ) -> None:
-        """Compara os documentos mais recentes dos índices diários do OTO Dashboard."""
-        index_prefix = f"{client_id}_oto_dashboard"
+        """Consulta o OTO pelo índice base e compara os documentos de cada data."""
+        index_name = f"{client_id}_oto_dashboard"
         previous_date = self._reference_date - timedelta(days=1)
-        try:
-            index_names = self._repository.get_index_names_for_dates(
-                index_prefix,
-                (self._reference_date, previous_date),
-            )
-        except Exception as error:
-            errors.append(
-                f"Índices OTO Dashboard com prefixo '{index_prefix}' | erro ao localizar "
-                f"datas: {error.__class__.__name__}: {error}"
-            )
-            return
-
-        current_index_name = index_names.get(self._reference_date)
-        previous_index_name = index_names.get(previous_date)
-        if current_index_name is None:
-            errors.append(
-                f"Índice OTO Dashboard não encontrado para {self._reference_date.isoformat()}."
-            )
-        if previous_index_name is None:
-            errors.append(
-                f"Índice OTO Dashboard não encontrado para {previous_date.isoformat()}."
-            )
-        if current_index_name is None or previous_index_name is None:
-            return
-
-        self._validate_mapping(
-            current_index_name,
-            EXPECTED_OTO_DASHBOARD_MAPPING,
-            errors,
-            details,
-        )
-        self._validate_mapping(
-            previous_index_name,
-            EXPECTED_OTO_DASHBOARD_MAPPING,
-            errors,
-            details,
-        )
-
-        current_document = self._validate_dated_index_document(
-            current_index_name,
+        general_errors = _CategorizedMessages(errors, "Geral")
+        current_documents = self._get_documents_by_timestamp_match(
+            index_name,
             self._reference_date,
-            "@timestamp",
-            errors,
-            details,
+            general_errors,
+            timestamp_field="@timestamp",
         )
-        previous_document = self._validate_dated_index_document(
-            previous_index_name,
+        previous_documents = self._get_documents_by_timestamp_match(
+            index_name,
             previous_date,
-            "@timestamp",
+            general_errors,
+            timestamp_field="@timestamp",
+        )
+        if current_documents is None or previous_documents is None:
+            return
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por @timestamp retornou "
+            f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
+            f"{len(previous_documents)} em {previous_date.isoformat()}."
+        )
+
+        documents = [*current_documents, *previous_documents]
+        if documents:
+            self._run_validation_stage(
+                "Mapping",
+                errors,
+                details,
+                lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                    documents,
+                    EXPECTED_OTO_DASHBOARD_MAPPING,
+                    stage_errors,
+                    stage_details,
+                    group_errors_by_document=True,
+                ),
+            )
+        else:
+            errors.append(
+                f"[Mapping] Índice '{index_name}' não retornou documentos para validar mapping."
+            )
+
+        self._run_validation_stage(
+            "Timestamp",
             errors,
             details,
+            lambda stage_errors, stage_details: self._validate_oto_timestamp_documents(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
         )
-        if current_document is not None and previous_document is not None:
-            self._validate_oto_dashboard_metrics(
-                current_index_name,
+        if not current_documents or not previous_documents:
+            errors.append(
+                f"[Comparação percentual] Índice '{index_name}' sem documentos nas duas "
+                "datas necessárias para comparar percentuais."
+            )
+            return
+
+        current_document = current_documents[0]
+        previous_document = previous_documents[0]
+        metric_index_name = str(current_document.get("_index", index_name))
+        self._run_validation_stage(
+            "Comparação percentual",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_oto_dashboard_metrics(
+                metric_index_name,
                 current_document,
                 previous_document,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+    def _validate_oto_timestamp_documents(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if not current_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com @timestamp em "
+                f"{self._reference_date.isoformat()}."
+            )
+        else:
+            self._validate_documents_for_date(
+                index_name,
+                current_documents,
+                "@timestamp",
+                self._reference_date,
                 errors,
                 details,
             )
+        if not previous_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com @timestamp em "
+                f"{previous_date.isoformat()}."
+            )
+            return
+        self._validate_documents_for_date(
+            index_name,
+            previous_documents,
+            "@timestamp",
+            previous_date,
+            errors,
+            details,
+        )
 
     def _validate_oto_dashboard_metrics(
         self,
