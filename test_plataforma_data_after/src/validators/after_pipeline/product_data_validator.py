@@ -185,7 +185,7 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
-        self._validate_documents_by_reference_date(
+        self._validate_documents_by_reference_month(
             f"{target.client_id}_score_history",
             "date",
             EXPECTED_SCORE_HISTORY_MAPPING,
@@ -686,6 +686,67 @@ class ProductDataValidator:
             )
         )
 
+    def _validate_documents_by_reference_month(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida todos os documentos do mês atual, sem resolver alias."""
+        year_month = self._reference_date.strftime("%Y-%m")
+        general_errors = _CategorizedMessages(errors, "Geral")
+        try:
+            documents = self._repository.get_documents_by_month_match(
+                index_name,
+                self._reference_date,
+                timestamp_field,
+            )
+        except Exception as error:
+            general_errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos de "
+                f"{year_month}: {error.__class__.__name__}: {error}"
+            )
+            return
+
+        if not documents:
+            general_errors.append(
+                f"Índice '{index_name}' não retornou documentos com "
+                f"{timestamp_field} no mês {year_month}."
+            )
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por {timestamp_field} em "
+            f"{year_month} retornou {len(documents)} documento(s)."
+        )
+        self._run_validation_stage(
+            "Mapping",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                group_errors_by_document=True,
+            ),
+        )
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_documents_for_month(
+                index_name,
+                documents,
+                timestamp_field,
+                year_month,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
     def _validate_compliance_variation(
         self,
         index_name: str,
@@ -975,6 +1036,39 @@ class ProductDataValidator:
         details.append(
             f"Índice '{index_name}' | busca por {timestamp_field} em "
             f"{expected_date.isoformat()} retornou {len(documents)} documento(s), "
+            "todos validados."
+        )
+
+    def _validate_documents_for_month(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        timestamp_field: str,
+        expected_year_month: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que cada documento retornado pertence ao mês consultado."""
+        invalid_timestamps: list[str] = []
+        for document in documents:
+            timestamp = self._source(document).get(timestamp_field)
+            if not isinstance(timestamp, str) or not timestamp.startswith(expected_year_month):
+                document_id = str(document.get("_id", "não informado"))
+                invalid_timestamps.append(
+                    f"_id={document_id}, {timestamp_field}={timestamp or 'não informado'}"
+                )
+
+        if invalid_timestamps:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_timestamps)} de "
+                f"{len(documents)} documento(s) possuem {timestamp_field} fora de "
+                f"{expected_year_month}: {', '.join(invalid_timestamps)}."
+            )
+            return
+
+        details.append(
+            f"Índice '{index_name}' | busca por {timestamp_field} em "
+            f"{expected_year_month} retornou {len(documents)} documento(s), "
             "todos validados."
         )
 
