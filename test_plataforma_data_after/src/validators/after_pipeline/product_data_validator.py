@@ -185,16 +185,10 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
-        index_name = f"{target.client_id}_score_history"
-        self._validate_mapping(
-            index_name,
+        self._validate_documents_by_reference_date(
+            f"{target.client_id}_score_history",
+            "date",
             EXPECTED_SCORE_HISTORY_MAPPING,
-            errors,
-            details,
-        )
-        self._validate_score_history(
-            index_name,
-            client,
             errors,
             details,
         )
