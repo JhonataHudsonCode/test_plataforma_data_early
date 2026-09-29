@@ -15,29 +15,40 @@ class OpenSearchAliasesValidator:
         try:
             aliases = self._repository.get_aliases()
         except RuntimeError as error:
-            return [str(error)], []
+            return [f"[Índices] {error}"], []
 
         if not aliases:
-            return ["Ambiente OpenSearch | Nenhum alias foi encontrado."], []
+            return ["[Índices] Ambiente OpenSearch | Nenhum alias foi encontrado."], []
 
         errors: list[str] = []
         valid_aliases = 0
+        valid_indices = 0
         for alias_data in aliases:
             alias = alias_data["alias"].strip()
             index_name = alias_data["index"].strip()
+
+            if index_name:
+                valid_indices += 1
+            else:
+                errors.append(
+                    f"[Índices] Ambiente OpenSearch | Alias '{alias}' não possui índice de destino."
+                )
+                continue
 
             if self._has_matching_prefix(alias, index_name):
                 valid_aliases += 1
                 continue
 
             errors.append(
-                "Ambiente OpenSearch | "
+                "[Prefixos dos aliases] Ambiente OpenSearch | "
                 f"Alias '{alias}' aponta para o índice '{index_name}', "
                 "mas o prefixo do índice não corresponde ao alias."
             )
 
         details = [
-            "Ambiente OpenSearch | "
+            "[Índices] Ambiente OpenSearch | "
+            f"{valid_indices} índice(s) de destino retornado(s) para {len(aliases)} alias(es).",
+            "[Prefixos dos aliases] Ambiente OpenSearch | "
             f"{valid_aliases} alias(es) apontam para índices com o prefixo esperado."
         ]
         return errors, details
