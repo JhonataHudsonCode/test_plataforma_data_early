@@ -166,16 +166,19 @@ class ProductDataValidator:
         return errors, details
 
     def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
-        return self._validate_module_indices(
-            target,
-            "has_asset",
-            (("authorized-software", "lastupdated"), ("mandatory-software", "lastupdated")),
-            compare_previous_day=False,
-            expected_mappings={
-                "authorized-software": EXPECTED_SOFTWARE_POLICY_MAPPING,
-                "mandatory-software": EXPECTED_SOFTWARE_POLICY_MAPPING,
-            },
-        )
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+
+        for suffix in ("authorized-software", "mandatory-software"):
+            self._validate_documents_by_reference_date(
+                f"{target.client_id}_{suffix}",
+                "lastUpdated",
+                EXPECTED_SOFTWARE_POLICY_MAPPING,
+                errors,
+                details,
+            )
+        return errors, details
 
     def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(target, "is_in_platform")
@@ -635,9 +638,9 @@ class ProductDataValidator:
         expected_mapping: dict[str, str | dict[str, Any]],
         errors: list[str],
         details: list[str],
-        validate_creation_date: bool = False,
     ) -> None:
         """Busca diretamente os documentos de hoje, sem resolver o índice por alias."""
+        general_errors = _CategorizedMessages(errors, "Geral")
         try:
             documents = self._repository.get_documents_by_date_match(
                 index_name,
@@ -645,7 +648,7 @@ class ProductDataValidator:
                 timestamp_field,
             )
         except Exception as error:
-            errors.append(
+            general_errors.append(
                 f"Índice '{index_name}' | erro ao consultar documentos de "
                 f"{self._reference_date.isoformat()}: "
                 f"{error.__class__.__name__}: {error}"
@@ -653,31 +656,41 @@ class ProductDataValidator:
             return
 
         if not documents:
-            errors.append(
+            general_errors.append(
                 f"Índice '{index_name}' não retornou documentos com "
                 f"{timestamp_field} em {self._reference_date.isoformat()}."
             )
             return
 
-        self._validate_mappings_for_documents(
-            documents,
-            expected_mapping,
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por {timestamp_field} em "
+            f"{self._reference_date.isoformat()} retornou {len(documents)} documento(s)."
+        )
+        self._run_validation_stage(
+            "Mapping",
             errors,
             details,
-        )
-        self._validate_current_asset_documents(
-            index_name,
-            documents,
-            timestamp_field,
-            errors,
-            details,
-        )
-        if validate_creation_date:
-            self._validate_document_indexes_creation_date(
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
                 documents,
-                errors,
-                details,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                group_errors_by_document=True,
+            ),
+        )
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_documents_for_date(
+                index_name,
+                documents,
+                timestamp_field,
+                self._reference_date,
+                stage_errors,
+                stage_details,
             )
+        )
 
     def _validate_compliance_variation(
         self,
