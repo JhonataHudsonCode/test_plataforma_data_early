@@ -11,9 +11,6 @@ from src.models.opensearch_client.elastalert_status_mapping import (
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_ALERTS_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
-from src.validators.client_data.opensearch_client.helpers import (
-    OpenSearchClientValidationHelper,
-)
 from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
 
 
@@ -37,13 +34,13 @@ class AlertsIndexValidator:
         if not client:
             return ClientValidationResult(
                 target.client_id,
-                failures=[f"Cliente '{target.client_id}' não encontrado no Cognito."],
+                failures=[f"[Geral] Cliente '{target.client_id}' não encontrado no Cognito."],
             )
         if not client.get("has_alerts"):
             return ClientValidationResult(
                 target.client_id,
                 infos=[
-                    f"Cliente '{target.client_id}' possui has_alerts desabilitado; "
+                    f"[Geral] Cliente '{target.client_id}' possui has_alerts desabilitado; "
                     "validação do OpenSearch não aplicável."
                 ],
             )
@@ -54,6 +51,7 @@ class AlertsIndexValidator:
                 host, ELASTALERT_STATUS_INDEX_NAME
             )
             failures: list[str] = []
+            details: list[str] = []
             index = next(
                 (item for item in indices if item.name == ELASTALERT_STATUS_INDEX_NAME),
                 None,
@@ -62,36 +60,70 @@ class AlertsIndexValidator:
                 return ClientValidationResult(
                     target.client_id,
                     failures=[
-                        f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
+                        f"[Geral] Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
                         f"não encontrado no host '{host}'. Índices encontrados: "
                         f"{', '.join(item.name for item in indices) or 'nenhum'}."
                     ],
                 )
-            document_failures, details = (
-                OpenSearchClientValidationHelper.validate_latest_document(
-                    self._opensearch_repository,
-                    target.client_id,
-                    host,
-                    ELASTALERT_STATUS_INDEX_NAME,
-                    self._reference_date,
-                )
+            details.append(
+                f"[Geral] Cliente '{target.client_id}' | índice "
+                f"'{ELASTALERT_STATUS_INDEX_NAME}' encontrado no host '{host}'."
             )
-            failures.extend(document_failures)
-
-            metadata = self._opensearch_repository.get_index_metadata(host, ELASTALERT_STATUS_INDEX_NAME)
-            if not metadata.mapping:
+            documents = self._opensearch_repository.get_documents_by_timestamp_match(
+                host,
+                ELASTALERT_STATUS_INDEX_NAME,
+                self._reference_date,
+            )
+            if not documents:
                 failures.append(
-                    f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' "
-                    f"não possui mapping configurado. Host consultado: '{host}'."
+                    f"[Timestamp] Cliente '{target.client_id}' | índice "
+                    f"'{ELASTALERT_STATUS_INDEX_NAME}' | nenhum documento retornado com "
+                    f"@timestamp em {self._reference_date.isoformat()}."
+                )
+                return ClientValidationResult(
+                    target.client_id, failures=failures, details=details
+                )
+
+            first_source = documents[0].get("_source", {})
+            mapping_errors = OpenSearchMappingValidator().validate_document(
+                first_source,
+                EXPECTED_ELASTALERT_STATUS_MAPPING,
+            )
+            failures.extend(
+                f"[Mapping] Cliente '{target.client_id}' | índice "
+                f"'{ELASTALERT_STATUS_INDEX_NAME}' | primeiro documento "
+                f"(_id={documents[0].get('_id', 'não informado')}) com mapping inválido: {error}"
+                for error in mapping_errors
+            )
+
+            invalid_timestamps: list[str] = []
+            for document in documents:
+                timestamp = document.get("_source", {}).get("@timestamp")
+                if not isinstance(timestamp, str) or not timestamp.startswith(
+                    self._reference_date.isoformat()
+                ):
+                    invalid_timestamps.append(
+                        f"_id={document.get('_id', 'não informado')}, "
+                        f"@timestamp={timestamp or 'não informado'}"
+                    )
+            if invalid_timestamps:
+                failures.append(
+                    f"[Timestamp] Cliente '{target.client_id}' | índice "
+                    f"'{ELASTALERT_STATUS_INDEX_NAME}' | {len(invalid_timestamps)} de "
+                    f"{len(documents)} documento(s) com @timestamp diferente de "
+                    f"{self._reference_date.isoformat()}: {', '.join(invalid_timestamps)}."
                 )
             else:
-                failures.extend(
-                    f"Cliente '{target.client_id}' | índice '{ELASTALERT_STATUS_INDEX_NAME}' | "
-                    f"host '{host}' | mapping inválido: {error}"
-                    for error in OpenSearchMappingValidator().validate(
-                        metadata.mapping.get("properties", {}),
-                        EXPECTED_ELASTALERT_STATUS_MAPPING,
-                    )
+                details.append(
+                    f"[Timestamp] Índice '{ELASTALERT_STATUS_INDEX_NAME}' | consulta por "
+                    f"@timestamp em {self._reference_date.isoformat()} retornou "
+                    f"{len(documents)} documento(s), todos validados."
+                )
+            if not mapping_errors:
+                details.append(
+                    f"[Mapping] Índice '{ELASTALERT_STATUS_INDEX_NAME}' | mapping do "
+                    f"primeiro documento (_id={documents[0].get('_id', 'não informado')}) "
+                    "validado com sucesso."
                 )
             return ClientValidationResult(
                 target.client_id,
@@ -102,7 +134,7 @@ class AlertsIndexValidator:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Cliente '{target.client_id}' | endpoint '{host}' | falha inesperada durante "
+                    f"[Geral] Cliente '{target.client_id}' | endpoint '{host}' | falha inesperada durante "
                     f"a validação de '{ELASTALERT_STATUS_INDEX_NAME}': "
                     f"{error.__class__.__name__}: {error}"
                 ],

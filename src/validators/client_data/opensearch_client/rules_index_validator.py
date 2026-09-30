@@ -11,7 +11,7 @@ from src.models.opensearch_client.rules_mapping import (
 from src.queries.cognito_client_queries import SELECT_COGNITO_CLIENT_HAS_ALERTS_BY_ID
 from src.repositories.db_client_repository import DataBaseRepository
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
-from src.validators.client_data.opensearch_client.helpers import OpenSearchClientValidationHelper
+from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
 
 
 class RulesIndexValidator:
@@ -35,7 +35,7 @@ class RulesIndexValidator:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Cliente '{target.client_id}' não encontrado no Cognito; "
+                    f"[Geral] Cliente '{target.client_id}' não encontrado no Cognito; "
                     "consulta de has_alerts não retornou registro."
                 ],
             )
@@ -43,7 +43,7 @@ class RulesIndexValidator:
             return ClientValidationResult(
                 target.client_id,
                 infos=[
-                    f"Cliente '{target.client_id}' possui has_alerts desabilitado; "
+                    f"[Geral] Cliente '{target.client_id}' possui has_alerts desabilitado; "
                     "índice rules não aplicável."
                 ],
             )
@@ -56,53 +56,58 @@ class RulesIndexValidator:
             index = {item.name: item for item in indices}.get(RULES_INDEX_NAME)
             if index is None:
                 failures.append(
-                    f"Cliente '{target.client_id}' | host '{host}' | índice rules não encontrado."
+                    f"[Geral] Cliente '{target.client_id}' | host '{host}' | índice rules não encontrado."
                 )
                 return ClientValidationResult(target.client_id, failures=failures)
             if index.document_count <= 0:
                 failures.append(
-                    f"Cliente '{target.client_id}' | host '{host}' | índice rules "
+                    f"[Geral] Cliente '{target.client_id}' | host '{host}' | índice rules "
                     "retornou zero documentos."
                 )
-            else:
-                details.append(
-                    f"Índice rules encontrado com {index.document_count} documento(s)."
-                )
+                return ClientValidationResult(target.client_id, failures=failures)
 
-            timestamp_failures, timestamp_details = (
-                OpenSearchClientValidationHelper.validate_latest_document(
-                    self._opensearch_repository,
-                    target.client_id,
-                    host,
-                    RULES_INDEX_NAME,
-                    self._reference_date,
-                )
+            details.append(
+                f"[Geral] Índice rules encontrado com {index.document_count} documento(s)."
             )
-            failures.extend(timestamp_failures)
-            details.extend(timestamp_details)
-
-            has_mapping, mapping_errors = OpenSearchClientValidationHelper.validate_mapping(
-                self._opensearch_repository, host, RULES_INDEX_NAME, EXPECTED_RULES_MAPPING
+            documents = self._opensearch_repository.get_documents(
+                host,
+                RULES_INDEX_NAME,
+                size=1,
+                sort_by_timestamp=True,
             )
-            if not has_mapping:
+            if not documents:
                 failures.append(
-                    f"Cliente '{target.client_id}' | host '{host}' | índice rules "
-                    "não possui mapping configurado."
+                    f"[Geral] Cliente '{target.client_id}' | host '{host}' | índice rules "
+                    "possui documentos na listagem, mas não retornou documento para validar o mapping."
                 )
-            else:
-                failures.extend(
-                    f"Cliente '{target.client_id}' | índice '{RULES_INDEX_NAME}' | "
-                    f"host '{host}' | mapping inválido: {error}"
-                    for error in mapping_errors
+                return ClientValidationResult(
+                    target.client_id,
+                    failures=failures,
+                    details=details,
                 )
-                if not mapping_errors:
-                    details.append("Mapping do índice rules validado com sucesso.")
+
+            document = documents[0]
+            document_id = document.get("_id", "não informado")
+            mapping_errors = OpenSearchMappingValidator().validate_document(
+                document.get("_source", {}),
+                EXPECTED_RULES_MAPPING,
+            )
+            failures.extend(
+                f"[Mapping] Cliente '{target.client_id}' | índice '{RULES_INDEX_NAME}' | "
+                f"host '{host}' | documento '{document_id}' | mapping inválido: {error}"
+                for error in mapping_errors
+            )
+            if not mapping_errors:
+                details.append(
+                    f"[Mapping] Índice rules | documento '{document_id}' | "
+                    "mapping validado com sucesso."
+                )
             return ClientValidationResult(target.client_id, failures=failures, details=details)
         except Exception as error:
             return ClientValidationResult(
                 target.client_id,
                 failures=[
-                    f"Cliente '{target.client_id}' | host '{host}' | falha ao validar "
+                    f"[Geral] Cliente '{target.client_id}' | host '{host}' | falha ao validar "
                     f"o índice rules: {error.__class__.__name__}: {error}"
                 ],
             )

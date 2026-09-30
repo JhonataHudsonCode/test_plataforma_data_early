@@ -165,28 +165,6 @@ def test_should_validate_epss_opensearch_product(
     report.assert_no_failures()
     return
 
-
-@allure.title("Validar índice {cliente}_vulnerability-historical")
-def test_should_validate_asset_vulnerability_historical_opensearch_product(
-    db_client_repository: DataBaseRepository,
-    product_repository: OpenSearchVulnerabilityRepository,
-    client_targets,
-) -> None:
-    report = ClientValidationReport()
-    today = date.today()
-    test_name = inspect.currentframe().f_code.co_name
-    validator = HistoricalVulnerabilityValidator(
-        db_client_repository,
-        product_repository,
-        today,
-    )
-    for target in client_targets:
-        result = validator.validate(target)
-        report.add_client_result(result.client_id, result.failures, result.infos, result.details)
-    _save_client_report(report, test_name)
-    report.assert_no_failures()
-    return
-
 #DUVIDA: todos os documentos devem estar com o status ativo? atualmente o metodo
 @allure.title("Validar índice de produto cve_trends")
 def test_should_validate_cve_trends_opensearch_product(

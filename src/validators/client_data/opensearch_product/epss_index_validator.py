@@ -21,26 +21,62 @@ class EpssIndexValidator:
 
     def validate(self, client_id: str) -> ClientValidationResult:
         failures: list[str] = []
+        details: list[str] = []
         try:
             indices = self._product_repository.get_indices_epss(EPSS_INDEX_NAME)
             index = {item.name: item for item in indices}.get(EPSS_INDEX_NAME)
             if index is None:
-                failures.append(f"Cliente '{client_id}' | índice de produto '{EPSS_INDEX_NAME}' não encontrado.")
+                failures.append(
+                    f"[Geral] Cliente '{client_id}' | índice de produto "
+                    f"'{EPSS_INDEX_NAME}' não encontrado."
+                )
             elif index.document_count <= 0:
-                failures.append(f"Cliente '{client_id}' | índice de produto '{EPSS_INDEX_NAME}' não contém documentos.")
+                failures.append(
+                    f"[Geral] Cliente '{client_id}' | índice de produto "
+                    f"'{EPSS_INDEX_NAME}' não contém documentos."
+                )
+            else:
+                details.append(
+                    f"[Geral] Cliente '{client_id}' | índice de produto "
+                    f"'{EPSS_INDEX_NAME}' encontrado com {index.document_count} documento(s)."
+                )
 
             metadata = self._product_repository.get_index_metadata(EPSS_INDEX_NAME)
             if not metadata.mapping:
-                failures.append(f"Cliente '{client_id}' | índice '{EPSS_INDEX_NAME}' não possui mapping configurado no OpenSearch de produto.")
-            else:
-                failures.extend(
-                    f"Cliente '{client_id}' | índice '{EPSS_INDEX_NAME}' | mapping inválido: {error}"
-                    for error in OpenSearchMappingValidator().validate(
-                        metadata.mapping.get("properties", {}), EXPECTED_EPSS_MAPPING
-                    )
+                failures.append(
+                    f"[Mapping] Cliente '{client_id}' | índice '{EPSS_INDEX_NAME}' "
+                    "não possui mapping configurado no OpenSearch de produto."
                 )
-            if metadata.created_at.date() != self._reference_date:
-                failures.append(f"Cliente '{client_id}' | índice '{EPSS_INDEX_NAME}' foi criado em '{metadata.created_at:%Y-%m-%d}', esperada '{self._reference_date:%Y-%m-%d}'.")
+            else:
+                mapping_errors = OpenSearchMappingValidator().validate(
+                    metadata.mapping.get("properties", {}),
+                    EXPECTED_EPSS_MAPPING,
+                )
+                failures.extend(
+                    f"[Mapping] Cliente '{client_id}' | índice '{EPSS_INDEX_NAME}' | "
+                    f"mapping inválido: {error}"
+                    for error in mapping_errors
+                )
+                if not mapping_errors:
+                    details.append(
+                        f"[Mapping] Índice '{EPSS_INDEX_NAME}' | mapping validado com sucesso."
+                    )
+
+            created_at = metadata.created_at.date()
+            if created_at != self._reference_date:
+                failures.append(
+                    f"[Creation date] Cliente '{client_id}' | índice '{EPSS_INDEX_NAME}' "
+                    f"foi criado em '{created_at:%Y-%m-%d}', esperada "
+                    f"'{self._reference_date:%Y-%m-%d}'."
+                )
+            else:
+                details.append(
+                    f"[Creation date] Índice '{EPSS_INDEX_NAME}' | data de criação "
+                    f"'{created_at:%Y-%m-%d}' validada."
+                )
         except Exception as error:
-            failures.append(f"Cliente '{client_id}' | falha ao validar o índice de produto '{EPSS_INDEX_NAME}': {error.__class__.__name__}: {error}")
-        return ClientValidationResult(client_id, failures=failures)
+            failures.append(
+                f"[Geral] Cliente '{client_id}' | falha ao validar o índice de produto "
+                f"'{EPSS_INDEX_NAME}': {error.__class__.__name__}: {error}"
+            )
+        return ClientValidationResult(client_id, failures=failures, details=details)

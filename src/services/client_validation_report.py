@@ -4,6 +4,7 @@ from html import escape
 import ast
 import logging
 import os
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import perf_counter
@@ -236,6 +237,29 @@ class ClientValidationReport:
         return sections
 
     @staticmethod
+    def _render_categorized_messages(messages: list[str], status: str) -> str:
+        """Agrupa mensagens marcadas por etapa em subtestes expansíveis."""
+        categories: dict[str, list[str]] = {}
+        for message in messages:
+            content = (
+                message.removeprefix("Motivo: ")
+                .removeprefix("Informação: ")
+                .removeprefix("Detalhe: ")
+            )
+            category_match = re.match(r"^\[([^\]]+)\]\s*(.*)$", content, flags=re.DOTALL)
+            category = category_match.group(1) if category_match else "Geral"
+            detail = category_match.group(2) if category_match else content
+            categories.setdefault(category, []).append(detail)
+
+        return "".join(
+            f'<details class="subtest"><summary>{escape(category)} — {escape(status)} '
+            f'({len(category_messages)})</summary><ul>'
+            + "".join(f"<li>{escape(message)}</li>" for message in category_messages)
+            + "</ul></details>"
+            for category, category_messages in categories.items()
+        )
+
+    @staticmethod
     def write_html_from_text(
         report_path: str | Path,
         html_path: str | Path,
@@ -308,11 +332,14 @@ class ClientValidationReport:
                 return f'<div class="empty">{escape(empty_text)}</div>'
             cards = []
             for client, reasons in clients:
-                reason_html = "".join(
-                    f"<li>{escape(reason.removeprefix('Motivo: ').removeprefix('Informação: '))}</li>"
-                    for reason in reasons
+                details = ClientValidationReport._render_categorized_messages(
+                    reasons,
+                    {
+                        "fail": "Falha",
+                        "info": "Informativo",
+                        "pass": "Sucesso",
+                    }[tone],
                 )
-                details = f"<ul>{reason_html}</ul>" if reason_html else ""
                 cards.append(
                     f'<details class="client-card {tone}">'
                     f'<summary class="client-name">{escape(client)}</summary>{details}</details>'
@@ -365,6 +392,8 @@ class ClientValidationReport:
     .client-card.pass {{ background: var(--green-bg); border-left-color: var(--green); }}
     .client-name {{ font-size: 15px; font-weight: bold; }}
     .client-card ul {{ margin-bottom: 0; }}
+    .subtest {{ background:rgba(255,255,255,.48); border-left:3px solid currentColor; border-radius:4px; margin:8px 0; padding:7px 10px; }}
+    .subtest summary {{ font-weight:bold; }}
     ul {{ color: #4b5863; margin: 7px 0 0; padding-left: 20px; }}
     .empty {{ color: var(--muted); font-style: italic; }}
     footer {{ color: var(--muted); font-size: 12px; margin-top: 20px; text-align: right; }}
@@ -444,9 +473,12 @@ class ClientValidationReport:
                 return '<p class="empty">Nenhum registro.</p>'
             return "".join(
                 f'<details class="client" style="border-left-color:{color};background:{background}">'
-                f'<summary>{escape(client_id)}</summary><ul>'
-                + "".join(f"<li>{escape(message)}</li>" for message in messages)
-                + "</ul></details>"
+                f'<summary>{escape(client_id)}</summary>'
+                + ClientValidationReport._render_categorized_messages(
+                    messages,
+                    {"Falhas": "Falha", "Informativos": "Informativo", "Aprovados": "Sucesso"}[section],
+                )
+                + "</details>"
                 for client_id, messages in clients
             )
 
@@ -466,7 +498,7 @@ class ClientValidationReport:
             for section, (color, _) in tones.items()
         )
         return f'''<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>{escape(title)}</title><style>
-body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''
+body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}.subtest{{border-left:3px solid #7591a7;border-radius:4px;margin:8px 0;padding:7px 10px}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''
 
     @staticmethod
     def email_summary_html_from_text(report_path: str | Path) -> str:

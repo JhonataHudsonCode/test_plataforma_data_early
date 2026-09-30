@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from src.connections.opensearch_factory import OpenSearchConnectionFactory
 from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.models.opensearch_client.opensearch_index_metadata import OpenSearchIndexMetadata
@@ -128,6 +128,36 @@ class OpenSearchClientRepository:
                 connection.close()
 
             return response['hits']['hits']
+
+    def get_documents_by_timestamp_match(
+        self,
+        client_host: str,
+        index_name: str,
+        reference_date: date,
+        size: int = 10_000,
+    ) -> list[dict[str, Any]]:
+        """Retorna os documentos cujo `@timestamp` corresponde à data informada."""
+        connection = self._connection_factory.create_for_host(client_host)
+        try:
+            response = connection.client.search(
+                index=index_name,
+                body={
+                    "size": size,
+                    "query": {"match": {"@timestamp": reference_date.isoformat()}},
+                },
+            )
+        except Exception as error:
+            message = (
+                f"Não foi possível buscar documentos do índice '{index_name}' "
+                f"com @timestamp em '{reference_date.isoformat()}' no host "
+                f"'{client_host}': {error.__class__.__name__}: {error}"
+            )
+            logger.exception(message)
+            raise RuntimeError(message) from error
+        finally:
+            connection.close()
+
+        return response.get("hits", {}).get("hits", [])
 
     def get_index_metadata(
         self,
