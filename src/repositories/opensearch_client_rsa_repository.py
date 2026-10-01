@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from src.connections.opensearch_factory import OpenSearchConnectionFactory
 from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
 from src.models.opensearch_client.opensearch_index_metadata import OpenSearchIndexMetadata
@@ -150,6 +150,45 @@ class OpenSearchClientRepository:
             message = (
                 f"Não foi possível buscar documentos do índice '{index_name}' "
                 f"com @timestamp em '{reference_date.isoformat()}' no host "
+                f"'{client_host}': {error.__class__.__name__}: {error}"
+            )
+            logger.exception(message)
+            raise RuntimeError(message) from error
+        finally:
+            connection.close()
+
+        return response.get("hits", {}).get("hits", [])
+
+    def get_documents_by_timestamp_range(
+        self,
+        client_host: str,
+        index_name: str,
+        start_date: date,
+        end_date: date,
+        size: int = 10_000,
+    ) -> list[dict[str, Any]]:
+        """Retorna documentos com ``@timestamp`` dentro do intervalo informado."""
+        connection = self._connection_factory.create_for_host(client_host)
+        try:
+            response = connection.client.search(
+                index=index_name,
+                body={
+                    "size": size,
+                    "sort": [{"@timestamp": {"order": "desc"}}],
+                    "query": {
+                        "range": {
+                            "@timestamp": {
+                                "gte": start_date.isoformat(),
+                                "lt": (end_date + timedelta(days=1)).isoformat(),
+                            }
+                        }
+                    },
+                },
+            )
+        except Exception as error:
+            message = (
+                f"Não foi possível buscar documentos do índice '{index_name}' "
+                f"entre '{start_date.isoformat()}' e '{end_date.isoformat()}' no host "
                 f"'{client_host}': {error.__class__.__name__}: {error}"
             )
             logger.exception(message)

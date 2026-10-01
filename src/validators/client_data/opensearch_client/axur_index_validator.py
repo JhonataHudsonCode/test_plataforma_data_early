@@ -69,17 +69,19 @@ class AxurIndexValidator:
                 f"[Geral] Cliente '{target.client_id}' | índice Axur '{AXUR_INDEX_NAME}' "
                 f"encontrado com {index.document_count} documento(s)."
             )
-            documents = self._opensearch_repository.get_documents(
+            start_date = self._subtract_months(self._reference_date, months=3)
+            documents = self._opensearch_repository.get_documents_by_timestamp_range(
                 host,
                 AXUR_INDEX_NAME,
+                start_date=start_date,
+                end_date=self._reference_date,
                 size=index.document_count,
-                sort_by_timestamp=True,
             )
             if not documents:
                 failures.append(
-                    f"[Geral] Cliente '{target.client_id}' | índice Axur "
-                    f"'{AXUR_INDEX_NAME}' possui documentos na listagem, mas a consulta "
-                    "não retornou documentos para validação."
+                    f"[Timestamp] Cliente '{target.client_id}' | índice Axur "
+                    f"'{AXUR_INDEX_NAME}' | nenhum documento retornado com @timestamp "
+                    f"entre {start_date.isoformat()} e {self._reference_date.isoformat()}."
                 )
                 return ClientValidationResult(
                     target.client_id,
@@ -91,7 +93,7 @@ class AxurIndexValidator:
                 target.client_id, host, documents, failures, details
             )
             self._validate_document_timestamps(
-                target.client_id, documents, failures, details
+                target.client_id, documents, start_date, failures, details
             )
         except Exception as error:
             failures.append(
@@ -130,12 +132,11 @@ class AxurIndexValidator:
         self,
         client_id: str,
         documents: list[dict],
+        start_date: date,
         failures: list[str],
         details: list[str],
     ) -> None:
-        cutoff_date = self._subtract_months(self._reference_date, months=3)
         invalid_documents: list[str] = []
-        historical_document: tuple[str, str] | None = None
         for document in documents:
             document_id = document.get("_id", "não informado")
             timestamp = document.get("_source", {}).get("@timestamp")
@@ -151,33 +152,25 @@ class AxurIndexValidator:
                     f"_id={document_id} (@timestamp inválido: {timestamp})"
                 )
                 continue
-            if timestamp_date > self._reference_date:
+            if not start_date <= timestamp_date <= self._reference_date:
                 invalid_documents.append(
-                    f"_id={document_id} (@timestamp futuro: {timestamp})"
+                    f"_id={document_id} (@timestamp fora do intervalo: {timestamp})"
                 )
-                continue
-            if timestamp_date <= cutoff_date and historical_document is None:
-                historical_document = (document_id, timestamp)
 
         if invalid_documents:
             failures.append(
                 f"[Timestamp] Cliente '{client_id}' | índice Axur '{AXUR_INDEX_NAME}' | "
                 f"{len(invalid_documents)} de {len(documents)} documento(s) com "
-                f"@timestamp ausente, inválido ou futuro: {', '.join(invalid_documents)}."
-            )
-        if historical_document is None:
-            failures.append(
-                f"[Timestamp] Cliente '{client_id}' | índice Axur '{AXUR_INDEX_NAME}' | "
-                f"nenhum documento com @timestamp em {cutoff_date.isoformat()} ou antes; "
-                "é esperado ao menos um documento de três meses atrás."
+                f"@timestamp ausente, inválido ou fora do intervalo de "
+                f"{start_date.isoformat()} a {self._reference_date.isoformat()}: "
+                f"{', '.join(invalid_documents)}."
             )
             return
-        if not invalid_documents:
-            details.append(
-                f"[Timestamp] Índice Axur '{AXUR_INDEX_NAME}' | @timestamp válido em "
-                f"todos os {len(documents)} documento(s); histórico de três meses confirmado "
-                f"no documento (_id={historical_document[0]}, @timestamp={historical_document[1]})."
-            )
+        details.append(
+            f"[Timestamp] Índice Axur '{AXUR_INDEX_NAME}' | consulta por @timestamp "
+            f"entre {start_date.isoformat()} e {self._reference_date.isoformat()} retornou "
+            f"{len(documents)} documento(s), todos validados."
+        )
 
     @staticmethod
     def _subtract_months(reference_date: date, months: int) -> date:
