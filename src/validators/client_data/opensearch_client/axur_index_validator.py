@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from calendar import monthrange
+from datetime import date, datetime
 
 from src.config.settings import ClientTarget
 from src.models.client_validation_result import ClientValidationResult
@@ -86,8 +87,12 @@ class AxurIndexValidator:
                     details=details,
                 )
 
-            self._validate_first_document_mapping(target.client_id, host, documents, failures, details)
-            self._validate_document_timestamps(target.client_id, documents, failures, details)
+            self._validate_first_document_mapping(
+                target.client_id, host, documents, failures, details
+            )
+            self._validate_document_timestamps(
+                target.client_id, documents, failures, details
+            )
         except Exception as error:
             failures.append(
                 f"[Geral] Cliente '{target.client_id}' | host '{host}' | falha ao validar "
@@ -128,8 +133,9 @@ class AxurIndexValidator:
         failures: list[str],
         details: list[str],
     ) -> None:
-        earliest_date = self._reference_date - timedelta(days=7)
+        cutoff_date = self._subtract_months(self._reference_date, months=3)
         invalid_documents: list[str] = []
+        historical_document: tuple[str, str] | None = None
         for document in documents:
             document_id = document.get("_id", "não informado")
             timestamp = document.get("_source", {}).get("@timestamp")
@@ -145,21 +151,37 @@ class AxurIndexValidator:
                     f"_id={document_id} (@timestamp inválido: {timestamp})"
                 )
                 continue
-            if not earliest_date <= timestamp_date <= self._reference_date:
+            if timestamp_date > self._reference_date:
                 invalid_documents.append(
-                    f"_id={document_id} (@timestamp={timestamp})"
+                    f"_id={document_id} (@timestamp futuro: {timestamp})"
                 )
+                continue
+            if timestamp_date <= cutoff_date and historical_document is None:
+                historical_document = (document_id, timestamp)
 
         if invalid_documents:
             failures.append(
                 f"[Timestamp] Cliente '{client_id}' | índice Axur '{AXUR_INDEX_NAME}' | "
                 f"{len(invalid_documents)} de {len(documents)} documento(s) com "
-                f"@timestamp fora da janela de {earliest_date.isoformat()} a "
-                f"{self._reference_date.isoformat()}: {', '.join(invalid_documents)}."
+                f"@timestamp ausente, inválido ou futuro: {', '.join(invalid_documents)}."
+            )
+        if historical_document is None:
+            failures.append(
+                f"[Timestamp] Cliente '{client_id}' | índice Axur '{AXUR_INDEX_NAME}' | "
+                f"nenhum documento com @timestamp em {cutoff_date.isoformat()} ou antes; "
+                "é esperado ao menos um documento de três meses atrás."
             )
             return
-        details.append(
-            f"[Timestamp] Índice Axur '{AXUR_INDEX_NAME}' | todos os {len(documents)} "
-            f"documento(s) possuem @timestamp entre {earliest_date.isoformat()} e "
-            f"{self._reference_date.isoformat()}."
-        )
+        if not invalid_documents:
+            details.append(
+                f"[Timestamp] Índice Axur '{AXUR_INDEX_NAME}' | @timestamp válido em "
+                f"todos os {len(documents)} documento(s); histórico de três meses confirmado "
+                f"no documento (_id={historical_document[0]}, @timestamp={historical_document[1]})."
+            )
+
+    @staticmethod
+    def _subtract_months(reference_date: date, months: int) -> date:
+        month_index = reference_date.year * 12 + reference_date.month - 1 - months
+        year, month_zero_based = divmod(month_index, 12)
+        month = month_zero_based + 1
+        return date(year, month, min(reference_date.day, monthrange(year, month)[1]))

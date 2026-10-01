@@ -7,4 +7,5 @@ Cenário: Validar o índice Axur no OpenSearch do cliente
     E verifico se has_axur está habilitado no Cognito
     Quando consulto todos os documentos do índice Axur
     Então o mapping do primeiro documento deve respeitar o contrato esperado
-    E todos os documentos devem possuir @timestamp dos últimos sete dias
+    E todos os documentos devem possuir @timestamp válido
+    E deve existir ao menos um documento com @timestamp de três meses atrás ou anterior
