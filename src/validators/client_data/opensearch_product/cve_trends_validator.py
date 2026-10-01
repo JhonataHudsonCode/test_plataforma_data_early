@@ -48,7 +48,7 @@ class CveTrendsValidator:
                 )
                 return ClientValidationResult(report_id, failures=failures, details=details)
 
-            self._validate_document_mappings(documents, failures, details)
+            self._validate_first_document_mapping(documents[0], failures, details)
             self._validate_active_statuses(documents, failures, details)
         except Exception as error:
             failures.append(
@@ -58,29 +58,25 @@ class CveTrendsValidator:
         return ClientValidationResult(report_id, failures=failures, details=details)
 
     @staticmethod
-    def _validate_document_mappings(
-        documents: list[dict],
+    def _validate_first_document_mapping(
+        document: dict,
         failures: list[str],
         details: list[str],
     ) -> None:
-        mapping_validator = OpenSearchMappingValidator()
-        mapping_failures = 0
-        for document in documents:
-            document_id = document.get("_id", "não informado")
-            errors = mapping_validator.validate_document(
-                document.get("_source", {}),
-                EXPECTED_CVE_TRENDS_MAPPING,
-            )
-            mapping_failures += len(errors)
-            failures.extend(
-                f"[Mapping] Índice '{CVE_TRENDS_INDEX_NAME}' | documento "
-                f"(_id={document_id}) | mapping inválido: {error}"
-                for error in errors
-            )
-        if not mapping_failures:
+        document_id = document.get("_id", "não informado")
+        mapping_errors = OpenSearchMappingValidator().validate_document(
+            document.get("_source", {}),
+            EXPECTED_CVE_TRENDS_MAPPING,
+        )
+        failures.extend(
+            f"[Mapping] Índice '{CVE_TRENDS_INDEX_NAME}' | primeiro documento "
+            f"(_id={document_id}) | mapping inválido: {error}"
+            for error in mapping_errors
+        )
+        if not mapping_errors:
             details.append(
-                f"[Mapping] Índice '{CVE_TRENDS_INDEX_NAME}' | mapping validado em "
-                f"todos os {len(documents)} documento(s)."
+                f"[Mapping] Índice '{CVE_TRENDS_INDEX_NAME}' | mapping do primeiro "
+                f"documento (_id={document_id}) validado com sucesso."
             )
 
     @staticmethod
@@ -97,6 +93,12 @@ class CveTrendsValidator:
             for document in documents
             if str(document.get("_source", {}).get("status", "")).casefold() != "ativo"
         ]
+        active_count = len(documents) - len(inactive_documents)
+        details.append(
+            f"[Status ativo] Índice '{CVE_TRENDS_INDEX_NAME}' | resumo da validação: "
+            f"{active_count} documento(s) ativo(s) e {len(inactive_documents)} "
+            f"documento(s) não ativo(s), de {len(documents)} no total."
+        )
         if inactive_documents:
             document_references = ", ".join(
                 f"_id={document_id} (status={status})"
@@ -104,11 +106,6 @@ class CveTrendsValidator:
             )
             failures.append(
                 f"[Status ativo] Índice '{CVE_TRENDS_INDEX_NAME}' | "
-                f"{len(inactive_documents)} de {len(documents)} documento(s) não estão "
-                f"com status 'ativo': {document_references}."
+                f"{len(inactive_documents)} documento(s) não estão com status 'ativo': "
+                f"{document_references}."
             )
-            return
-        details.append(
-            f"[Status ativo] Índice '{CVE_TRENDS_INDEX_NAME}' | todos os "
-            f"{len(documents)} documento(s) estão com status 'ativo'."
-        )
