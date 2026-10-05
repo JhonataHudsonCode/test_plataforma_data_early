@@ -10,7 +10,8 @@ from src.models.client_metadata import ClientMetadata, ClientMetadataAsset
 from src.queries.cognito_client_queries import (
     SELECT_ALL_CLIENTS,
     SELECT_CLIENT_OPENSEARCH_TARGETS,
-    SELECT_ID_CLIENTS
+    SELECT_ID_CLIENTS,
+    SELECT_WAZUH_CLIENT_TARGETS,
 )
 from src.queries.assets_client_queries import SELECT_ASSETS_CLIENT_ACTIVATION_KEYS
 
@@ -47,6 +48,18 @@ class DataBaseRepository:
     ) -> list[dict[str, Any]]:
         """Retorna os dados necessarios para testar o OpenSearch dos clientes."""
         query = sql.SQL(SELECT_CLIENT_OPENSEARCH_TARGETS).format(
+            schema_name=sql.Identifier(schema_name),
+        )
+        with self._connection.client.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query)
+            return list(cursor.fetchall())
+
+    def get_wazuh_client_targets(
+        self,
+        schema_name: str,
+    ) -> list[dict[str, Any]]:
+        """Retorna os campos do Cognito necessários para a validação Wazuh."""
+        query = sql.SQL(SELECT_WAZUH_CLIENT_TARGETS).format(
             schema_name=sql.Identifier(schema_name),
         )
         with self._connection.client.cursor(row_factory=dict_row) as cursor:

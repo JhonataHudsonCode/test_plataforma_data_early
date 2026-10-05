@@ -53,6 +53,16 @@ FROM {schema_name}.clients
 ORDER BY client_id;
 """
 
+SELECT_WAZUH_CLIENT_TARGETS = """
+SELECT
+    client_id,
+    client_type,
+    has_wazuh,
+    octopus_endpoint
+FROM {schema_name}.clients
+ORDER BY client_id;
+"""
+
 SELECT_ID_CLIENTS = """
 SELECT id, name FROM {schema_name}.clients AS c
 WHERE "name" = %s;

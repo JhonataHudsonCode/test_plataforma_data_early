@@ -171,34 +171,20 @@ def client_credentials_from_env() -> list[ClientOpenSearchCredentials]:
     return credentials
 
 
-def wazuh_credentials_from_env() -> list[WazuhCredentials]:
-    """Carrega as credenciais Wazuh sem reutilizar os alvos do Octopus."""
-    raw = os.getenv("WAZUH_CREDENTIALS", "{}")
-    try:
-        values = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise ValueError("WAZUH_CREDENTIALS deve ser um JSON válido.") from error
+def wazuh_credentials_from_env() -> WazuhCredentials | None:
+    """Carrega a credencial única da API Wazuh configurada no ambiente."""
+    endpoint = os.getenv("WAZUH_ENDPOINT", "").strip()
+    internal_endpoint = os.getenv("WAZUH_INTERNAL_ENDPOINT", "").strip()
+    username = os.getenv("WAZUH_USERNAME", "").strip()
+    password = os.getenv("WAZUH_PASSWORD", "").strip()
 
-    if not isinstance(values, dict):
-        raise ValueError("WAZUH_CREDENTIALS deve ser um objeto JSON.")
+    if not all((endpoint, internal_endpoint, username, password)):
+        return None
 
-    credentials: list[WazuhCredentials] = []
-    for name, value in values.items():
-        if not isinstance(value, dict):
-            raise ValueError(f"Credenciais Wazuh inválidas para {name}.")
-        endpoint = str(value.get("endpoint", "")).strip()
-        internal_endpoint = str(value.get("internal_endpoint", "")).strip()
-        if not endpoint or not internal_endpoint:
-            raise ValueError(
-                f"Endpoints externo e interno são obrigatórios para o Wazuh {name}."
-            )
-        credentials.append(
-            WazuhCredentials(
-                name=name,
-                endpoint=endpoint,
-                internal_endpoint=internal_endpoint,
-                username=_resolve_secret(str(value.get("username", "")), "WAZUH_USERNAME"),
-                password=_resolve_secret(str(value.get("password", "")), "WAZUH_PASSWORD"),
-            )
-        )
-    return credentials
+    return WazuhCredentials(
+        name="Wazuh",
+        endpoint=endpoint,
+        internal_endpoint=internal_endpoint,
+        username=username,
+        password=password,
+    )

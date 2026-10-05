@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import json
+import math
 from pathlib import Path
 import re
 from collections.abc import Callable
@@ -79,6 +80,29 @@ class ProductDataValidator:
         ("cls", None),
         ("cls_alta", None),
         ("cls_media", None),
+    )
+    _SCORE_HISTORY_PERCENTAGE_FIELDS: tuple[str, ...] = (
+        "score",
+        "vulnerabilities",
+        "rsa",
+        "siem",
+        "cis",
+        "cis_alta",
+        "cis_media",
+        "cis_baixa",
+        "axur",
+        "siem_waiting_client_score",
+        "siem_incident_score",
+        "siem_observability_score",
+        "siem_final_score",
+        "siem_observability_data.total_missing_categories",
+        "siem_observability_data.total_observability_categories",
+        "siem_observability_data.observability_categories",
+        "assessment_final_score",
+        "global_score_comparison",
+        "sector_score_comparison",
+        "global_score_average",
+        "sector_score_average",
     )
     def __init__(
         self,
@@ -185,14 +209,207 @@ class ProductDataValidator:
         if client is None:
             return errors, details
 
-        self._validate_documents_by_reference_month(
+        self._validate_score_history_by_reference_date(
             f"{target.client_id}_score_history",
-            "date",
-            EXPECTED_SCORE_HISTORY_MAPPING,
             errors,
             details,
         )
         return errors, details
+
+    def _validate_score_history_by_reference_date(
+        self,
+        index_name: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara os totais de score_history retornados para hoje e ontem."""
+        previous_date = self._reference_date - timedelta(days=1)
+        general_errors = _CategorizedMessages(errors, "Geral")
+        current_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            self._reference_date,
+            general_errors,
+            timestamp_field="date",
+        )
+        previous_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            previous_date,
+            general_errors,
+            timestamp_field="date",
+        )
+        if current_documents is None or previous_documents is None:
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por date retornou "
+            f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
+            f"{len(previous_documents)} em {previous_date.isoformat()}."
+        )
+
+        documents = [*current_documents, *previous_documents]
+        if documents:
+            self._run_validation_stage(
+                "Mapping",
+                errors,
+                details,
+                lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                    documents,
+                    EXPECTED_SCORE_HISTORY_MAPPING,
+                    stage_errors,
+                    stage_details,
+                    group_errors_by_document=True,
+                ),
+            )
+        else:
+            errors.append(
+                f"[Mapping] Índice '{index_name}' não retornou documentos para validar mapping."
+            )
+
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_score_history_dates(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        if not current_documents or not previous_documents:
+            errors.append(
+                f"[Comparação percentual] Índice '{index_name}' sem documentos nas duas "
+                "datas necessárias para comparar os scores."
+            )
+            return
+
+        self._run_validation_stage(
+            "Score",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_positive_scores(
+                index_name,
+                documents,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+        totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: totals.update(
+                self._capture_score_history_totals(
+                    index_name,
+                    current_documents,
+                    previous_documents,
+                    stage_errors,
+                    stage_details,
+                )
+            ),
+        )
+        if not totals:
+            return
+
+        current_totals, previous_totals, invalid_fields = totals["totals"]
+        valid_fields = tuple(
+            field
+            for field in self._SCORE_HISTORY_PERCENTAGE_FIELDS
+            if field not in invalid_fields
+        )
+        if not valid_fields:
+            return
+
+        self._run_validation_stage(
+            "Comparação percentual",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_absolute_fifty_percent_variation(
+                index_name,
+                tuple(
+                    (field, current_totals[field], previous_totals[field])
+                    for field in valid_fields
+                ),
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+    def _validate_score_history_dates(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if not current_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com date em "
+                f"{self._reference_date.isoformat()}."
+            )
+        else:
+            self._validate_documents_for_date(
+                index_name,
+                current_documents,
+                "date",
+                self._reference_date,
+                errors,
+                details,
+            )
+
+        if not previous_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com date em "
+                f"{previous_date.isoformat()}."
+            )
+            return
+        self._validate_documents_for_date(
+            index_name,
+            previous_documents,
+            "date",
+            previous_date,
+            errors,
+            details,
+        )
+
+    def _capture_score_history_totals(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, tuple[dict[str, float], dict[str, float], set[str]]]:
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name,
+            current_documents,
+            self._SCORE_HISTORY_PERCENTAGE_FIELDS,
+            errors,
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name,
+            previous_documents,
+            self._SCORE_HISTORY_PERCENTAGE_FIELDS,
+            errors,
+        )
+        details.append(
+            f"Índice '{index_name}' | somas dos campos de score captadas em "
+            f"{len(current_documents)} documento(s) de hoje e "
+            f"{len(previous_documents)} de ontem."
+        )
+        return {
+            "totals": (
+                current_totals,
+                previous_totals,
+                current_invalid_fields | previous_invalid_fields,
+            )
+        }
 
     def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
         client, errors, details = self._get_applicable_client(
@@ -746,6 +963,7 @@ class ProductDataValidator:
         expected_mapping: dict[str, str | dict[str, Any]],
         errors: list[str],
         details: list[str],
+        validate_positive_scores: bool = False,
     ) -> None:
         """Valida todos os documentos do mês atual, sem resolver alias."""
         year_month = self._reference_date.strftime("%Y-%m")
@@ -799,6 +1017,65 @@ class ProductDataValidator:
                 stage_details,
             ),
         )
+        if validate_positive_scores:
+            self._run_validation_stage(
+                "Score",
+                errors,
+                details,
+                lambda stage_errors, stage_details: self._validate_positive_scores(
+                    index_name,
+                    documents,
+                    stage_errors,
+                    stage_details,
+                ),
+            )
+
+    def _validate_positive_scores(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que os scores do hit e do _source sejam numéricos e positivos."""
+        invalid_hit_scores: list[str] = []
+        invalid_source_scores: list[str] = []
+
+        for document in documents:
+            document_id = str(document.get("_id", "não informado"))
+            hit_score = document.get("_score")
+            source_score = self._source(document).get("score")
+
+            if not self._is_positive_score(hit_score):
+                invalid_hit_scores.append(f"_id={document_id}, _score={hit_score!r}")
+            if not self._is_positive_score(source_score):
+                invalid_source_scores.append(
+                    f"_id={document_id}, _source.score={source_score!r}"
+                )
+
+        if invalid_hit_scores:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_hit_scores)} de "
+                f"{len(documents)} documento(s) possuem _score ausente, zero, "
+                f"negativo ou inválido: {', '.join(invalid_hit_scores)}."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' | _score positivo validado em "
+                f"{len(documents)} documento(s)."
+            )
+
+        if invalid_source_scores:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_source_scores)} de "
+                f"{len(documents)} documento(s) possuem _source.score ausente, "
+                f"zero, negativo ou inválido: {', '.join(invalid_source_scores)}."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' | _source.score positivo validado em "
+                f"{len(documents)} documento(s)."
+            )
 
     def _validate_compliance_variation(
         self,
@@ -1867,6 +2144,50 @@ class ProductDataValidator:
                 f"hoje={current_value}, variação={variation:.0%}."
             )
 
+    def _validate_absolute_fifty_percent_variation(
+        self,
+        index_name: str,
+        fields: tuple[tuple[str, object, object], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Falha quando a variação absoluta dos totais de score ultrapassa 50%."""
+        for field_name, current_value, previous_value in fields:
+            current = float(current_value)
+            previous = float(previous_value)
+            if not math.isfinite(current) or not math.isfinite(previous):
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} deve ser finito "
+                    f"(ontem={previous_value}, hoje={current_value})."
+                )
+                continue
+
+            if previous == 0:
+                if current == 0:
+                    details.append(
+                        f"Índice '{index_name}' | total de {field_name}: "
+                        "ontem=0, hoje=0; sem variação."
+                    )
+                else:
+                    errors.append(
+                        f"Índice '{index_name}' | total de {field_name} variou de 0 "
+                        f"para {current_value}; não há base para uma variação de até 50%."
+                    )
+                continue
+
+            variation = abs(current - previous) / abs(previous)
+            if variation > 0.5:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} variou {variation:.0%} "
+                    f"(ontem={previous_value}, hoje={current_value}); "
+                    "máximo permitido: 50%."
+                )
+                continue
+            details.append(
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
+            )
+
     @staticmethod
     def _source(document: dict[str, Any]) -> dict[str, Any]:
         return document.get("_source", document)
@@ -1878,6 +2199,14 @@ class ProductDataValidator:
     @classmethod
     def _is_valid_score(cls, value: object) -> bool:
         return cls._is_number(value) and value not in {0, -1}
+
+    @classmethod
+    def _is_positive_score(cls, value: object) -> bool:
+        return (
+            cls._is_number(value)
+            and math.isfinite(float(value))
+            and float(value) > 0
+        )
 
     @staticmethod
     def _parse_date(value: object) -> date | None:

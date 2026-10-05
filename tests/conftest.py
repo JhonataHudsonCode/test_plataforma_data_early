@@ -258,7 +258,7 @@ def client_credentials() -> list[ClientOpenSearchCredentials]:
 
 
 @pytest.fixture(scope="session")
-def wazuh_credentials() -> list[WazuhCredentials]:
+def wazuh_credentials() -> WazuhCredentials | None:
     return wazuh_credentials_from_env()
 
 
