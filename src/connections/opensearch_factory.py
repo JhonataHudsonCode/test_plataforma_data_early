@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from urllib.parse import urlparse
 
 from src.config.settings import OpenSearchSettings
 from src.config.settings import ClientOpenSearchCredentials
@@ -19,7 +20,12 @@ class OpenSearchConnectionFactory:
         self._client_credentials = client_credentials or []
 
     def create_for_host(self, host: str) -> OpenSearchConnection:
-        normalized_host = host.replace("https://", "").replace("http://", "").rstrip("/")
+        endpoint = host.strip().rstrip("/")
+        parsed = urlparse(
+            endpoint if "://" in endpoint else f"https://{endpoint}"
+        )
+        normalized_host = parsed.hostname or parsed.path
+        port = parsed.port or self._settings.port
         credentials = next(
             (
                 item
@@ -29,7 +35,9 @@ class OpenSearchConnectionFactory:
             None,
         )
         if credentials is None:
-            return OpenSearchConnection(replace(self._settings, host=normalized_host))
+            return OpenSearchConnection(
+                replace(self._settings, host=normalized_host, port=port)
+            )
         return self.create_for_client(credentials)
 
     def create_for_client(

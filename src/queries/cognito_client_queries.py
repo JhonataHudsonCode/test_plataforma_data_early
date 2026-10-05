@@ -44,6 +44,15 @@ FROM {schema_name}.clients
 ORDER BY client_id;
 """
 
+SELECT_CLIENT_OPENSEARCH_TARGETS = """
+SELECT
+    client_id,
+    client_type,
+    octopus_endpoint
+FROM {schema_name}.clients
+ORDER BY client_id;
+"""
+
 SELECT_ID_CLIENTS = """
 SELECT id, name FROM {schema_name}.clients AS c
 WHERE "name" = %s;

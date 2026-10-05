@@ -79,11 +79,13 @@ def pytest_sessionfinish(session, exitstatus):
         if path.name != general_report_name
     )
     if report_paths:
+        general_report_path = Path("reports/client-validation") / general_report_name
         ClientValidationReport.write_combined(
             report_paths,
-            Path("reports/client-validation") / general_report_name,
+            general_report_path,
             elapsed_seconds=perf_counter() - session._validation_started_at,
         )
+        ClientValidationReport.zip_general_report(general_report_path.with_suffix(".html"))
 
     failed_reports: list[tuple[Path, str]] = []
     for report_path in report_paths:

@@ -5,6 +5,7 @@ import ast
 import logging
 import os
 import re
+from zipfile import ZIP_DEFLATED, ZipFile
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import perf_counter
@@ -182,6 +183,18 @@ class ClientValidationReport:
         destination.write_text(content + "\n", encoding="utf-8")
         cls.write_html_from_text(Path(output_path), Path(output_path).with_suffix(".html"))
         return content
+
+    @staticmethod
+    def zip_general_report(report_path: str | Path) -> Path:
+        """Compacta exclusivamente o arquivo HTML do relatório geral."""
+        html_path = Path(report_path)
+        if not html_path.is_file():
+            raise FileNotFoundError(f"Relatório geral não encontrado: {html_path}")
+
+        zip_path = html_path.with_suffix(".zip")
+        with ZipFile(zip_path, mode="w", compression=ZIP_DEFLATED) as archive:
+            archive.write(html_path, arcname=html_path.name)
+        return zip_path
 
     @staticmethod
     def allure_title_from_source(source_path: str | Path, function_name: str) -> str:
@@ -483,13 +496,14 @@ class ClientValidationReport:
             )
 
         tests_html = "".join(
-            f'<section class="test"><h2>{escape(test_name)}</h2>'
+            f'<details class="test"><summary><h2>{escape(test_name)}</h2></summary>'
             + "".join(
-                f'<section class="status"><h3>{section} ({len(sections[section])})</h3>'
-                f'{render_clients(section, sections[section])}</section>'
+                f'<details class="status"><summary><h3>{section} '
+                f'({len(sections[section])})</h3></summary>'
+                f'{render_clients(section, sections[section])}</details>'
                 for section in tones
             )
-            + "</section>"
+            + "</details>"
             for test_name, sections in groups
         )
         metrics = "".join(

@@ -18,6 +18,23 @@ class OpenSearchClientRepository:
     def __init__(self, connection_factory: OpenSearchConnectionFactory) -> None:
         self._connection_factory = connection_factory
 
+    def check_connection(self, client_host: str) -> bool:
+        """Verifica se o OpenSearch do cliente responde no endpoint informado."""
+        connection = None
+        try:
+            connection = self._connection_factory.create_for_host(client_host)
+            return bool(connection.client.ping())
+        except Exception as error:
+            logger.warning(
+                "Falha ao conectar ao OpenSearch do cliente em %s: %s",
+                client_host,
+                error,
+            )
+            return False
+        finally:
+            if connection is not None:
+                connection.close()
+
     def get_indices_rsa(
         self,
         client_host: str,
