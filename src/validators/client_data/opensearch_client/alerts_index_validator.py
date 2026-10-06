@@ -36,13 +36,17 @@ class AlertsIndexValidator:
                 target.client_id,
                 failures=[f"[Geral] Cliente '{target.client_id}' não encontrado no Cognito."],
             )
-        if not client.get("has_alerts"):
+        if "has_alerts" not in client:
+            return ClientValidationResult(target.client_id, failures=[f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito não retornou a coluna 'has_alerts'."])
+        cognito_validation = f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | coluna 'has_alerts' encontrada com valor {'habilitado' if client['has_alerts'] else 'desabilitado'}."
+        if not client["has_alerts"]:
             return ClientValidationResult(
                 target.client_id,
                 infos=[
                     f"[Geral] Cliente '{target.client_id}' possui has_alerts desabilitado; "
                     "validação do OpenSearch não aplicável."
                 ],
+                details=[cognito_validation],
             )
 
         host = target.host or client["octopus_endpoint"].replace("https://", "")
@@ -51,7 +55,7 @@ class AlertsIndexValidator:
                 host, ELASTALERT_STATUS_INDEX_NAME
             )
             failures: list[str] = []
-            details: list[str] = []
+            details: list[str] = [cognito_validation]
             index = next(
                 (item for item in indices if item.name == ELASTALERT_STATUS_INDEX_NAME),
                 None,
@@ -64,6 +68,7 @@ class AlertsIndexValidator:
                         f"não encontrado no host '{host}'. Índices encontrados: "
                         f"{', '.join(item.name for item in indices) or 'nenhum'}."
                     ],
+                    details=[cognito_validation],
                 )
             details.append(
                 f"[Geral] Cliente '{target.client_id}' | índice "
@@ -138,4 +143,5 @@ class AlertsIndexValidator:
                     f"a validação de '{ELASTALERT_STATUS_INDEX_NAME}': "
                     f"{error.__class__.__name__}: {error}"
                 ],
+                details=[cognito_validation],
             )

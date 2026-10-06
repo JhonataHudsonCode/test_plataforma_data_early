@@ -39,32 +39,36 @@ class RulesIndexValidator:
                     "consulta de has_alerts não retornou registro."
                 ],
             )
-        if not client.get("has_alerts"):
+        if "has_alerts" not in client:
+            return ClientValidationResult(target.client_id, failures=[f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito não retornou a coluna 'has_alerts'."])
+        cognito_validation = f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | coluna 'has_alerts' encontrada com valor {'habilitado' if client['has_alerts'] else 'desabilitado'}."
+        if not client["has_alerts"]:
             return ClientValidationResult(
                 target.client_id,
                 infos=[
                     f"[Geral] Cliente '{target.client_id}' possui has_alerts desabilitado; "
                     "índice rules não aplicável."
                 ],
+                details=[cognito_validation],
             )
 
         host = target.host or client["octopus_endpoint"].replace("https://", "")
         try:
             failures: list[str] = []
-            details: list[str] = []
+            details: list[str] = [cognito_validation]
             indices = self._opensearch_repository.get_indices_rsa(host, RULES_INDEX_NAME)
             index = {item.name: item for item in indices}.get(RULES_INDEX_NAME)
             if index is None:
                 failures.append(
                     f"[Geral] Cliente '{target.client_id}' | host '{host}' | índice rules não encontrado."
                 )
-                return ClientValidationResult(target.client_id, failures=failures)
+                return ClientValidationResult(target.client_id, failures=failures, details=details)
             if index.document_count <= 0:
                 failures.append(
                     f"[Geral] Cliente '{target.client_id}' | host '{host}' | índice rules "
                     "retornou zero documentos."
                 )
-                return ClientValidationResult(target.client_id, failures=failures)
+                return ClientValidationResult(target.client_id, failures=failures, details=details)
 
             details.append(
                 f"[Geral] Índice rules encontrado com {index.document_count} documento(s)."
@@ -110,4 +114,5 @@ class RulesIndexValidator:
                     f"[Geral] Cliente '{target.client_id}' | host '{host}' | falha ao validar "
                     f"o índice rules: {error.__class__.__name__}: {error}"
                 ],
+                details=[cognito_validation],
             )

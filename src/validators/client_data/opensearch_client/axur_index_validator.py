@@ -37,18 +37,22 @@ class AxurIndexValidator:
                     "consulta de has_axur não retornou registro."
                 ],
             )
-        if not client.get("has_axur"):
+        if "has_axur" not in client:
+            return ClientValidationResult(target.client_id, failures=[f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito não retornou a coluna 'has_axur'."])
+        cognito_validation = f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | coluna 'has_axur' encontrada com valor {'habilitado' if client['has_axur'] else 'desabilitado'}."
+        if not client["has_axur"]:
             return ClientValidationResult(
                 target.client_id,
                 infos=[
                     f"[Geral] Cliente '{target.client_id}' possui has_axur desabilitado; "
                     "índice Axur não aplicável."
                 ],
+                details=[cognito_validation],
             )
 
         host = target.host or client["octopus_endpoint"].replace("https://", "")
         failures: list[str] = []
-        details: list[str] = []
+        details: list[str] = [cognito_validation]
         try:
             indices = self._opensearch_repository.get_indices_axur(host, AXUR_INDEX_NAME)
             index = {item.name: item for item in indices}.get(AXUR_INDEX_NAME)

@@ -44,13 +44,28 @@ class RsaIndexValidator:
                     "consulta de has_rsa não retornou registro."
                 ],
             )
-        if not client.get("has_rsa"):
+        if "has_rsa" not in client:
+            return ClientValidationResult(
+                target.client_id,
+                failures=[
+                    f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do "
+                    "Cognito não retornou a coluna 'has_rsa'."
+                ],
+            )
+
+        has_rsa = bool(client["has_rsa"])
+        cognito_validation = (
+            f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | "
+            f"coluna 'has_rsa' encontrada com valor 'habilitado'."
+        )
+        if not has_rsa:
             return ClientValidationResult(
                 target.client_id,
                 infos=[
                     f"[Geral] Cliente '{target.client_id}' possui has_rsa desabilitado; "
                     "índice RSA não aplicável."
                 ],
+                details=[cognito_validation],
             )
 
         host = target.host or client["octopus_endpoint"].replace("https://", "")
@@ -65,10 +80,12 @@ class RsaIndexValidator:
                         f"'{RSA_INDEX_NAME}' não encontrado. Índices encontrados: "
                         f"{', '.join(item.name for item in indices) or 'nenhum'}."
                     ],
+                    details=[cognito_validation],
                 )
 
             failures: list[str] = []
             details: list[str] = [
+                cognito_validation,
                 f"[Geral] Cliente '{target.client_id}' | índice RSA '{RSA_INDEX_NAME}' "
                 f"encontrado no host '{host}'."
             ]
@@ -137,4 +154,5 @@ class RsaIndexValidator:
                     f"[Geral] Cliente '{target.client_id}' | falha ao validar o índice RSA "
                     f"'{RSA_INDEX_NAME}': {error.__class__.__name__}: {error}"
                 ],
+                details=[cognito_validation],
             )

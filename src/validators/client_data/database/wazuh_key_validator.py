@@ -18,8 +18,11 @@ class WazuhKeyValidator:
         client = self._cognito_repository.get_table("public", target.client_id, SELECT_COGNITO_CLIENT_HAS_WAZUH_BY_ID)
         if not client:
             return ClientValidationResult(target.client_id, failures=[f"Cliente '{target.client_id}' não encontrado no Cognito; consulta de has_wazuh não retornou registro."])
-        if not client.get("has_wazuh"):
-            return ClientValidationResult(target.client_id, infos=[f"Cliente '{target.client_id}' possui has_wazuh desabilitado; chave de ativação não aplicável."])
+        if "has_wazuh" not in client:
+            return ClientValidationResult(target.client_id, failures=[f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito não retornou a coluna 'has_wazuh'."])
+        cognito_validation = f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | coluna 'has_wazuh' encontrada com valor {'habilitado' if client['has_wazuh'] else 'desabilitado'}."
+        if not client["has_wazuh"]:
+            return ClientValidationResult(target.client_id, infos=[f"Cliente '{target.client_id}' possui has_wazuh desabilitado; chave de ativação não aplicável."], details=[cognito_validation])
         keys = self._assets_repository.get_activation_keys(
             "public",
             target.client_id,
@@ -28,7 +31,7 @@ class WazuhKeyValidator:
         if not keys:
             return ClientValidationResult(
                 target.client_id,
-                failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."],
+                failures=[f"Cliente '{target.client_id}' não possui chave de ativação cadastrada."], details=[cognito_validation],
             )
         duplicate_names = self._duplicate_names(keys)
         if duplicate_names:
@@ -37,7 +40,7 @@ class WazuhKeyValidator:
                 failures=[
                     f"Cliente '{target.client_id}' possui mais de uma chave do Wazuh "
                     f"com o mesmo activation_key_name: {', '.join(duplicate_names)}."
-                ],
+                ], details=[cognito_validation],
             )
 
         invalid_ids = [
@@ -51,11 +54,12 @@ class WazuhKeyValidator:
                 failures=[
                     f"Chave do Wazuh do cliente '{target.client_id}' possui "
                     f"activation_key_id inválido: {', '.join(repr(value) for value in invalid_ids)}."
-                ],
+                ], details=[cognito_validation],
             )
         return ClientValidationResult(
             target.client_id,
             details=[
+                cognito_validation,
                 f"Chave do Wazuh do cliente '{target.client_id}' possui {len(keys)} "
                 "activation_key_id preenchido(s) no formato UUID."
             ],
