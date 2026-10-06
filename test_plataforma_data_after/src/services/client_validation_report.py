@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from time import perf_counter
 from html import escape
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 
 _CURRENT_TEST_STARTED_AT: ContextVar[float | None] = ContextVar(
@@ -97,6 +98,7 @@ class ClientValidationReport:
             "Teste: Resumo geral da execução",
             f"Ambiente: {os.getenv('TEST_ENV', 'hml').strip().lower()}",
             f"Duração: {duration}",
+            f"Cenários testados: {len(grouped_results)}",
             "",
             "BDD:",
             "Consolidado dos resultados de todos os testes executados.",
@@ -128,6 +130,18 @@ class ClientValidationReport:
         destination.write_text(content + "\n", encoding="utf-8")
         cls.write_html_from_text(Path(output_path), Path(output_path).with_suffix(".html"))
         return content
+
+    @staticmethod
+    def zip_general_report(report_path: str | Path) -> Path:
+        """Compacta exclusivamente o HTML do relatório geral."""
+        html_path = Path(report_path)
+        if not html_path.is_file():
+            raise FileNotFoundError(f"Relatório geral não encontrado: {html_path}")
+
+        zip_path = html_path.with_suffix(".zip")
+        with ZipFile(zip_path, mode="w", compression=ZIP_DEFLATED) as archive:
+            archive.write(html_path, arcname=html_path.name)
+        return zip_path
 
     def curate(
         self,
@@ -351,19 +365,23 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             )
 
         tests_html = "".join(
-            f'<section class="test"><h2>{escape(test_name)}</h2>'
+            f'<details class="test"><summary><h2>{escape(test_name)}</h2></summary>'
             + "".join(
                 f'<details class="status"><summary>{section} ({len(sections[section])})</summary>'
                 f'{render_clients(section, sections[section])}</details>'
                 for section in tones
             )
-            + "</section>"
+            + "</details>"
             for test_name, sections in groups
         )
         metrics = "".join(
             f'<div class="metric" style="border-top-color:{color}">{section}'
             f'<b style="color:{color}">{totals[section]}</b></div>'
             for section, (color, _) in tones.items()
+        )
+        metrics += (
+            '<div class="metric" style="border-top-color:#18324a">Cenários testados'
+            f'<b style="color:#18324a">{len(groups)}</b></div>'
         )
         return f'''<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>{escape(title)}</title><style>
 body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}.subtest{{border:1px solid #dfe5ea;border-left:3px solid #7591a7;border-radius:5px;margin:9px 0;padding:9px 11px;background:#fafcfd}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''

@@ -135,11 +135,13 @@ def pytest_sessionfinish(session, exitstatus):
         if path.name != general_report_name
     )
     if report_paths:
+        general_report_path = CLIENT_REPORTS_DIRECTORY / general_report_name
         ClientValidationReport.write_combined(
             report_paths,
-            CLIENT_REPORTS_DIRECTORY / general_report_name,
+            general_report_path,
             elapsed_seconds=perf_counter() - session._validation_started_at,
         )
+        ClientValidationReport.zip_general_report(general_report_path.with_suffix(".html"))
     else:
         empty_report = ClientValidationReport(
             elapsed_seconds=perf_counter() - session._validation_started_at,

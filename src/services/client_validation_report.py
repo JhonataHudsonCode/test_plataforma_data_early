@@ -74,6 +74,7 @@ class ClientValidationReport:
             f"Teste: {test_name}",
             f"Ambiente: {environment}",
             f"Duração: {self._execution_duration()}",
+            f"Cenários testados: {len(grouped_results)}",
             "",
             "BDD:",
             bdd,
@@ -510,6 +511,10 @@ class ClientValidationReport:
             f'<div class="metric" style="border-top-color:{color}">{section}'
             f'<b style="color:{color}">{totals[section]}</b></div>'
             for section, (color, _) in tones.items()
+        )
+        metrics += (
+            '<div class="metric" style="border-top-color:#18324a">Cenários testados'
+            f'<b style="color:#18324a">{len(groups)}</b></div>'
         )
         return f'''<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>{escape(title)}</title><style>
 body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}main{{max-width:1080px;margin:auto;padding:30px 20px}}header{{background:#18324a;color:#fff;border-radius:10px;padding:28px 32px}}header p{{color:#d7e2eb;margin:0}}h1{{margin:7px 0;font-size:28px}}h2{{margin:0 0 18px}}h3{{font-size:15px;margin:0 0 9px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}}.metric,.test,.status{{background:#fff;border:1px solid #dfe5ea;border-radius:8px}}.metric{{padding:16px;border-top:4px solid;font-weight:bold}}.metric b{{display:block;font-size:30px}}.test{{padding:22px;margin-top:18px}}.status{{padding:14px;margin-top:12px}}.client{{border:1px solid #dfe5ea;border-left:4px solid;border-radius:6px;margin:8px 0;padding:10px 12px}}.subtest{{border-left:3px solid #7591a7;border-radius:4px;margin:8px 0;padding:7px 10px}}details summary{{cursor:pointer;font-weight:bold}}ul{{margin:8px 0 0;padding-left:20px}}.empty{{color:#64717d;font-style:italic}}@media(max-width:700px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main><header><small>RELATÓRIO GERAL DE VALIDAÇÃO</small><h1>{escape(title)}</h1><p>Ambiente: {escape(environment)} · Duração: {escape(duration)}</p></header><section class="grid">{metrics}</section>{tests_html}</main></body></html>'''
