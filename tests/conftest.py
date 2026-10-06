@@ -66,6 +66,57 @@ def pytest_sessionstart(session):
 
     client_report_path = Path("reports/client-validation")
     client_report_path.mkdir(parents=True, exist_ok=True)
+    for report_path in client_report_path.glob("test_*"):
+        if report_path.suffix in {".txt", ".html"}:
+            report_path.unlink()
+    for report_name in ("relatorio_geral.txt", "relatorio_geral.html", "relatorio_geral.zip"):
+        report_path = client_report_path / report_name
+        if report_path.exists():
+            report_path.unlink()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Gera um relatório mesmo quando uma fixture impede o corpo do teste."""
+    outcome = yield
+    test_report = outcome.get_result()
+
+    if test_report.when != "setup" or not test_report.failed:
+        return
+    if getattr(item, "_client_validation_setup_report_written", False):
+        return
+
+    item._client_validation_setup_report_written = True
+    test_name = item.originalname or item.name.split("[", maxsplit=1)[0]
+    error_type = (
+        call.excinfo.type.__name__
+        if call.excinfo is not None
+        else "Erro de preparação"
+    )
+    report = ClientValidationReport()
+    report.add_client_result(
+        "Infraestrutura",
+        failures=[
+            "Falha durante a preparação do teste "
+            f"'{test_name}': {error_type}. "
+            "O corpo do teste não foi executado; verifique a conectividade e as "
+            "credenciais das dependências necessárias."
+        ],
+    )
+
+    report_path = Path("reports/client-validation") / f"{test_name}.txt"
+    try:
+        report.write(
+            report_path,
+            ClientValidationReport.allure_title_from_source(item.path, test_name),
+            ClientValidationReport.bdd_from_test_name(test_name),
+        )
+        ClientValidationReport.write_html_from_text(
+            report_path,
+            report_path.with_suffix(".html"),
+        )
+    finally:
+        report.close()
 
 def pytest_sessionfinish(session, exitstatus):
     """

@@ -13,7 +13,7 @@ test-hml:
 	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest
 
 test-prod:
-	TEST_ENV=prod CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest
+	TEST_ENV=prod CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest tests
 
 test-credentials:
 	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest
