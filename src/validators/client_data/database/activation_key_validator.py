@@ -23,11 +23,21 @@ class ActivationKeyValidator:
         cognito_validation = f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | coluna 'has_bart' encontrada com valor {'habilitado' if client['has_bart'] else 'desabilitado'}."
         if not client["has_bart"]:
             return ClientValidationResult(target.client_id, infos=[f"Cliente '{target.client_id}' possui has_bart desabilitado; chave de ativação não aplicável."], details=[cognito_validation])
-        keys = self._assets_repository.get_activation_keys(
-            "public",
-            target.client_id,
-            SELECT_ASSETS_CLIENT_ACTIVATION_KEY_IDS,
-        )
+        try:
+            keys = self._assets_repository.get_activation_keys(
+                "public",
+                target.client_id,
+                SELECT_ASSETS_CLIENT_ACTIVATION_KEY_IDS,
+            )
+        except Exception as error:
+            return ClientValidationResult(
+                target.client_id,
+                failures=[
+                    f"[Geral] Cliente '{target.client_id}' | falha ao consultar a tabela "
+                    f"'activation_keys': {error.__class__.__name__}: {error}"
+                ],
+                details=[cognito_validation],
+            )
         if not keys:
             return ClientValidationResult(
                 target.client_id,

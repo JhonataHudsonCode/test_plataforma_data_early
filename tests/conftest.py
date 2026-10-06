@@ -77,34 +77,45 @@ def pytest_sessionstart(session):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Gera um relatório mesmo quando uma fixture impede o corpo do teste."""
+    """Gera um relatório quando a preparação ou a execução interrompe um teste."""
     outcome = yield
     test_report = outcome.get_result()
 
-    if test_report.when != "setup" or not test_report.failed:
+    if test_report.when not in {"setup", "call"} or not test_report.failed:
         return
-    if getattr(item, "_client_validation_setup_report_written", False):
+    if getattr(item, "_client_validation_failure_report_written", False):
         return
 
-    item._client_validation_setup_report_written = True
     test_name = item.originalname or item.name.split("[", maxsplit=1)[0]
+    report_path = Path("reports/client-validation") / f"{test_name}.txt"
+    # Quando o teste chega ao assert final, seu próprio relatório já foi salvo.
+    # Não o substituímos pelo relatório genérico de infraestrutura.
+    if report_path.exists():
+        return
+
+    item._client_validation_failure_report_written = True
     error_type = (
         call.excinfo.type.__name__
         if call.excinfo is not None
-        else "Erro de preparação"
+        else "Erro de execução"
+    )
+    phase_description = "preparação" if test_report.when == "setup" else "execução"
+    execution_note = (
+        "O corpo do teste não foi executado"
+        if test_report.when == "setup"
+        else "O relatório funcional não pôde ser concluído"
     )
     report = ClientValidationReport()
     report.add_client_result(
         "Infraestrutura",
         failures=[
-            "Falha durante a preparação do teste "
+            f"Falha durante a {phase_description} do teste "
             f"'{test_name}': {error_type}. "
-            "O corpo do teste não foi executado; verifique a conectividade e as "
+            f"{execution_note}; verifique a conectividade e as "
             "credenciais das dependências necessárias."
         ],
     )
 
-    report_path = Path("reports/client-validation") / f"{test_name}.txt"
     try:
         report.write(
             report_path,
