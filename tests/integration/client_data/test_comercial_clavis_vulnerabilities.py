@@ -193,7 +193,13 @@ def test_should_validate_axur_opensearch_client(
     validator = AxurIndexValidator(db_client_repository, client_repository, today)
     for target in client_targets:
         result = validator.validate(target)
-        report.add_client_result(result.client_id, result.failures, result.infos, result.details)
+        report.add_client_result(
+            result.client_id,
+            result.failures,
+            result.infos,
+            result.details,
+            not_executed=result.not_executed,
+        )
     _save_client_report(report, test_name)
     report.assert_no_failures()
     return

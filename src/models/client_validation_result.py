@@ -11,3 +11,4 @@ class ClientValidationResult:
     failures: list[str] = field(default_factory=list)
     infos: list[str] = field(default_factory=list)
     details: list[str] = field(default_factory=list)
+    not_executed: list[str] = field(default_factory=list)

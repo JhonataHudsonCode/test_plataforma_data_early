@@ -41,6 +41,7 @@ class ClientValidationReport:
         failures: list[str] | None = None,
         infos: list[str] | None = None,
         details: list[str] | None = None,
+        not_executed: list[str] | None = None,
     ) -> None:
         client_logs = self._log_records[self._log_cursor:]
         self._log_cursor = len(self._log_records)
@@ -48,6 +49,7 @@ class ClientValidationReport:
             "failures": failures or [],
             "infos": infos or [],
             "details": details or [],
+            "not_executed": not_executed or [],
             "logs": client_logs,
         }
 
@@ -83,6 +85,7 @@ class ClientValidationReport:
             ("Falhas", "Motivo"),
             ("Informativos", "Informação"),
             ("Aprovados", "Detalhe"),
+            ("Não executados", "Etapa"),
         ):
             clients = sections[section]
             lines.append(f"{section} ({self._count_subtests(clients)}):")
@@ -106,6 +109,8 @@ class ClientValidationReport:
             "Falhas": [],
             "Informativos": [],
             "Aprovados": [],
+            "Não executados": [],
+            "Não executados": [],
         }
         for client_id, result in self._results.items():
             if result["failures"]:
@@ -114,6 +119,8 @@ class ClientValidationReport:
                 sections["Informativos"].append((client_id, result["infos"]))
             if result["details"]:
                 sections["Aprovados"].append((client_id, result["details"]))
+            if result["not_executed"]:
+                sections["Não executados"].append((client_id, result["not_executed"]))
         return sections
 
     def write(
@@ -168,6 +175,7 @@ class ClientValidationReport:
                 ("Falhas", "Motivo"),
                 ("Informativos", "Informação"),
                 ("Aprovados", "Detalhe"),
+                ("Não executados", "Etapa"),
             ):
                 clients = sections[section]
                 lines.append(f"{section} ({cls._count_subtests(clients)}):")
@@ -235,6 +243,7 @@ class ClientValidationReport:
             "Falhas": [],
             "Informativos": [],
             "Aprovados": [],
+            "Não executados": [],
         }
         current: str | None = None
         for line in report.splitlines():
@@ -244,6 +253,8 @@ class ClientValidationReport:
                 current = "Informativos"
             elif line.startswith("Aprovados ("):
                 current = "Aprovados"
+            elif line.startswith("Não executados ("):
+                current = "Não executados"
             elif current and line.startswith("- Cliente: "):
                 sections[current].append((line.removeprefix("- Cliente: "), []))
             elif current and sections[current] and line.startswith("  "):
@@ -340,6 +351,7 @@ class ClientValidationReport:
             "Falhas": [],
             "Informativos": [],
             "Aprovados": [],
+            "Não executados": [],
         }
         current_section: str | None = None
         current_client: str | None = None
@@ -350,6 +362,8 @@ class ClientValidationReport:
                 current_section = "Informativos"
             elif line.startswith("Aprovados ("):
                 current_section = "Aprovados"
+            elif line.startswith("Não executados ("):
+                current_section = "Não executados"
             elif current_section and line.startswith("- Cliente: "):
                 current_client = line.removeprefix("- Cliente: ").strip()
                 sections[current_section].append((current_client, []))
@@ -373,6 +387,7 @@ class ClientValidationReport:
                         "fail": "Falha",
                         "info": "Informativo",
                         "pass": "Sucesso",
+                        "notrun": "Não executado",
                     }[tone],
                 )
                 cards.append(
@@ -407,8 +422,8 @@ class ClientValidationReport:
     .metric {{ padding: 18px 20px; }}
     .metric-label {{ color: var(--muted); font-size: 12px; font-weight: bold; text-transform: uppercase; }}
     .metric-value {{ font-size: 30px; font-weight: bold; margin-top: 2px; }}
-    .metric.fail {{ border-top: 4px solid var(--red); }} .metric.info {{ border-top: 4px solid var(--amber); }} .metric.pass {{ border-top: 4px solid var(--green); }}
-    .metric.fail .metric-value {{ color: var(--red); }} .metric.info .metric-value {{ color: var(--amber); }} .metric.pass .metric-value {{ color: var(--green); }}
+    .metric.fail {{ border-top: 4px solid var(--red); }} .metric.info {{ border-top: 4px solid var(--amber); }} .metric.pass {{ border-top: 4px solid var(--green); }} .metric.notrun {{ border-top: 4px solid var(--muted); }}
+    .metric.fail .metric-value {{ color: var(--red); }} .metric.info .metric-value {{ color: var(--amber); }} .metric.pass .metric-value {{ color: var(--green); }} .metric.notrun .metric-value {{ color: var(--muted); }}
     .panel {{ margin-top: 18px; padding: 22px; }}
     h2 {{ font-size: 18px; margin: 0 0 14px; }}
     .bdd {{ background: #f7f9fb; border-left: 4px solid #7591a7; color: #34495a; padding: 15px 18px; white-space: pre-line; }}
@@ -419,12 +434,12 @@ class ClientValidationReport:
     details[open] > summary::before {{ transform: rotate(90deg); }}
     .section-title h2 {{ margin: 0; }}
     .badge {{ border-radius: 999px; font-size: 12px; font-weight: bold; padding: 3px 9px; }}
-    .badge.fail {{ background: var(--red-bg); color: var(--red); }} .badge.info {{ background: var(--amber-bg); color: var(--amber); }} .badge.pass {{ background: var(--green-bg); color: var(--green); }}
+    .badge.fail {{ background: var(--red-bg); color: var(--red); }} .badge.info {{ background: var(--amber-bg); color: var(--amber); }} .badge.pass {{ background: var(--green-bg); color: var(--green); }} .badge.notrun {{ background: #eef1f4; color: var(--muted); }}
     .client-list {{ display: grid; gap: 10px; }}
     .client-card {{ border: 1px solid var(--line); border-left: 4px solid; border-radius: 6px; padding: 13px 16px; }}
     .client-card.fail {{ background: var(--red-bg); border-left-color: var(--red); }}
     .client-card.info {{ background: var(--amber-bg); border-left-color: var(--amber); }}
-    .client-card.pass {{ background: var(--green-bg); border-left-color: var(--green); }}
+    .client-card.pass {{ background: var(--green-bg); border-left-color: var(--green); }} .client-card.notrun {{ background: #f7f9fb; border-left-color: var(--muted); }}
     .client-name {{ font-size: 15px; font-weight: bold; }}
     .client-card ul {{ margin-bottom: 0; }}
     .subtest {{ background:rgba(255,255,255,.48); border-left:3px solid currentColor; border-radius:4px; margin:8px 0; padding:7px 10px; }}
@@ -445,11 +460,13 @@ class ClientValidationReport:
     <div class="metric fail"><div class="metric-label">Falhas</div><div class="metric-value">{counts['Falhas']}</div></div>
     <div class="metric info"><div class="metric-label">Informativos</div><div class="metric-value">{counts['Informativos']}</div></div>
     <div class="metric pass"><div class="metric-label">Aprovados</div><div class="metric-value">{counts['Aprovados']}</div></div>
+    <div class="metric notrun"><div class="metric-label">Não executados</div><div class="metric-value">{counts['Não executados']}</div></div>
   </section>
     <details class="panel"><summary class="section-title"><h2>BDD executado</h2></summary><div class="bdd">{escape(chr(10).join(bdd_lines))}</div></details>
     <details class="panel"><summary class="section-title"><h2>Falhas</h2><span class="badge fail">{counts['Falhas']}</span></summary><div class="client-list">{render_clients('Falhas', 'fail', 'Nenhuma falha registrada.')}</div></details>
     <details class="panel"><summary class="section-title"><h2>Informativos</h2><span class="badge info">{counts['Informativos']}</span></summary><div class="client-list">{render_clients('Informativos', 'info', 'Nenhum registro informativo.')}</div></details>
     <details class="panel"><summary class="section-title"><h2>Aprovados</h2><span class="badge pass">{counts['Aprovados']}</span></summary><div class="client-list">{render_clients('Aprovados', 'pass', 'Nenhum cliente aprovado.')}</div></details>
+    <details class="panel"><summary class="section-title"><h2>Não executados</h2><span class="badge notrun">{counts['Não executados']}</span></summary><div class="client-list">{render_clients('Não executados', 'notrun', 'Todas as etapas previstas foram executadas.')}</div></details>
   <footer>Fonte: relatório TXT gerado pela execução dos testes.</footer>
 </main></body>
 </html>
@@ -472,7 +489,12 @@ class ClientValidationReport:
         current_section: str | None = None
         for line in report.splitlines():
             if line.startswith("Teste executado: "):
-                current_group = {"Falhas": [], "Informativos": [], "Aprovados": []}
+                current_group = {
+                    "Falhas": [],
+                    "Informativos": [],
+                    "Aprovados": [],
+                    "Não executados": [],
+                }
                 groups.append((line.removeprefix("Teste executado: "), current_group))
             elif current_group and line.startswith("Falhas ("):
                 current_section = "Falhas"
@@ -480,6 +502,8 @@ class ClientValidationReport:
                 current_section = "Informativos"
             elif current_group and line.startswith("Aprovados ("):
                 current_section = "Aprovados"
+            elif current_group and line.startswith("Não executados ("):
+                current_section = "Não executados"
             elif current_group and current_section and line.startswith("- Cliente: "):
                 current_group[current_section].append(
                     (line.removeprefix("- Cliente: "), [])
@@ -496,6 +520,7 @@ class ClientValidationReport:
             "Falhas": ("#b42318", "#fff1f0"),
             "Informativos": ("#9a6700", "#fff8e6"),
             "Aprovados": ("#16734a", "#edf9f2"),
+            "Não executados": ("#64717d", "#f7f9fb"),
         }
         totals = {
             section: sum(
@@ -514,7 +539,12 @@ class ClientValidationReport:
                 f'<summary>{escape(client_id)}</summary>'
                 + ClientValidationReport._render_categorized_messages(
                     messages,
-                    {"Falhas": "Falha", "Informativos": "Informativo", "Aprovados": "Sucesso"}[section],
+                    {
+                        "Falhas": "Falha",
+                        "Informativos": "Informativo",
+                        "Aprovados": "Sucesso",
+                        "Não executados": "Não executado",
+                    }[section],
                 )
                 + "</details>"
                 for client_id, messages in clients
@@ -613,6 +643,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             "Falhas": [],
             "Informativos": [],
             "Aprovados": [],
+            "Não executados": [],
         }
         current_section: str | None = None
         for line in lines:
@@ -622,6 +653,8 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
                 current_section = "Informativos"
             elif line.startswith("Aprovados ("):
                 current_section = "Aprovados"
+            elif line.startswith("Não executados ("):
+                current_section = "Não executados"
             elif current_section and line.startswith("- Cliente: "):
                 sections[current_section].append(
                     (line.removeprefix("- Cliente: ").strip(), [])
@@ -660,6 +693,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             ("Falhas", "#b42318", "#fff1f0"),
             ("Informativos", "#9a6700", "#fff8e6"),
             ("Aprovados", "#16734a", "#edf9f2"),
+            ("Não executados", "#64717d", "#f7f9fb"),
         )
         metric_cells = "".join(
             f'<td width="33%" style="padding:14px 12px;border-top:4px solid {color};'
@@ -688,6 +722,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         {render_section("Falhas", "#b42318", "#fff1f0")}
         {render_section("Informativos", "#9a6700", "#fff8e6")}
         {render_section("Aprovados", "#16734a", "#edf9f2")}
+        {render_section("Não executados", "#64717d", "#f7f9fb")}
       </td></tr>
     </table>
   </td></tr></table>

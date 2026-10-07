@@ -36,9 +36,24 @@ class AxurIndexValidator:
                     f"[Geral] Cliente '{target.client_id}' não encontrado no Cognito; "
                     "consulta de has_axur não retornou registro."
                 ],
+                not_executed=self._not_executed_stages(
+                    target.client_id,
+                    "cliente não disponível para a validação Axur",
+                    "Mapping",
+                    "Timestamp",
+                ),
             )
         if "has_axur" not in client:
-            return ClientValidationResult(target.client_id, failures=[f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito não retornou a coluna 'has_axur'."])
+            return ClientValidationResult(
+                target.client_id,
+                failures=[f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito não retornou a coluna 'has_axur'."],
+                not_executed=self._not_executed_stages(
+                    target.client_id,
+                    "coluna has_axur não retornada pelo Cognito",
+                    "Mapping",
+                    "Timestamp",
+                ),
+            )
         cognito_validation = f"[Geral] Cliente '{target.client_id}' | tabela 'public.clients' do Cognito | coluna 'has_axur' encontrada com valor {'habilitado' if client['has_axur'] else 'desabilitado'}."
         if not client["has_axur"]:
             return ClientValidationResult(
@@ -48,6 +63,12 @@ class AxurIndexValidator:
                     "índice Axur não aplicável."
                 ],
                 details=[cognito_validation],
+                not_executed=self._not_executed_stages(
+                    target.client_id,
+                    "has_axur desabilitado",
+                    "Mapping",
+                    "Timestamp",
+                ),
             )
 
         host = target.host or client["octopus_endpoint"].replace("https://", "")
@@ -61,13 +82,33 @@ class AxurIndexValidator:
                     f"[Geral] Cliente '{target.client_id}' | índice Axur "
                     f"'{AXUR_INDEX_NAME}' não encontrado no OpenSearch do cliente."
                 )
-                return ClientValidationResult(target.client_id, failures=failures)
+                return ClientValidationResult(
+                    target.client_id,
+                    failures=failures,
+                    details=details,
+                    not_executed=self._not_executed_stages(
+                        target.client_id,
+                        "índice Axur não encontrado",
+                        "Mapping",
+                        "Timestamp",
+                    ),
+                )
             if index.document_count <= 0:
                 failures.append(
                     f"[Geral] Cliente '{target.client_id}' | índice Axur "
                     f"'{AXUR_INDEX_NAME}' não contém documentos."
                 )
-                return ClientValidationResult(target.client_id, failures=failures)
+                return ClientValidationResult(
+                    target.client_id,
+                    failures=failures,
+                    details=details,
+                    not_executed=self._not_executed_stages(
+                        target.client_id,
+                        "índice Axur sem documentos",
+                        "Mapping",
+                        "Timestamp",
+                    ),
+                )
 
             details.append(
                 f"[Geral] Cliente '{target.client_id}' | índice Axur '{AXUR_INDEX_NAME}' "
@@ -91,6 +132,11 @@ class AxurIndexValidator:
                     target.client_id,
                     failures=failures,
                     details=details,
+                    not_executed=self._not_executed_stages(
+                        target.client_id,
+                        "nenhum documento disponível para validar a estrutura",
+                        "Mapping",
+                    ),
                 )
 
             self._validate_first_document_mapping(
@@ -104,7 +150,33 @@ class AxurIndexValidator:
                 f"[Geral] Cliente '{target.client_id}' | host '{host}' | falha ao validar "
                 f"o índice Axur: {error.__class__.__name__}: {error}"
             )
-        return ClientValidationResult(target.client_id, failures=failures, details=details)
+        not_executed = (
+            self._not_executed_stages(
+                target.client_id,
+                "falha inesperada durante a validação do índice Axur",
+                "Mapping",
+                "Timestamp",
+            )
+            if failures and not any(message.startswith("[Mapping]") or message.startswith("[Timestamp]") for message in failures + details)
+            else []
+        )
+        return ClientValidationResult(
+            target.client_id,
+            failures=failures,
+            details=details,
+            not_executed=not_executed,
+        )
+
+    @staticmethod
+    def _not_executed_stages(
+        client_id: str,
+        reason: str,
+        *stages: str,
+    ) -> list[str]:
+        return [
+            f"[{stage}] Cliente '{client_id}' | etapa não executada: {reason}."
+            for stage in stages
+        ]
 
     @staticmethod
     def _validate_first_document_mapping(
