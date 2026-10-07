@@ -85,7 +85,7 @@ class ClientValidationReport:
             ("Aprovados", "Detalhe"),
         ):
             clients = sections[section]
-            lines.append(f"{section} ({len(clients)}):")
+            lines.append(f"{section} ({self._count_subtests(clients)}):")
             for client_id, messages in clients:
                 lines.append(f"- Cliente: {client_id}")
                 lines.extend(f"  {label}: {message}" for message in messages)
@@ -170,7 +170,7 @@ class ClientValidationReport:
                 ("Aprovados", "Detalhe"),
             ):
                 clients = sections[section]
-                lines.append(f"{section} ({len(clients)}):")
+                lines.append(f"{section} ({cls._count_subtests(clients)}):")
                 for client_id, messages in clients:
                     lines.append(f"- Cliente: {client_id}")
                     lines.extend(
@@ -251,6 +251,24 @@ class ClientValidationReport:
         return sections
 
     @staticmethod
+    def _subtest_category(message: str) -> str:
+        content = (
+            message.removeprefix("Motivo: ")
+            .removeprefix("Informação: ")
+            .removeprefix("Detalhe: ")
+        )
+        category_match = re.match(r"^\[([^\]]+)\]\s*", content, flags=re.DOTALL)
+        return category_match.group(1) if category_match else "Geral"
+
+    @classmethod
+    def _count_subtests(cls, clients: list[tuple[str, list[str]]]) -> int:
+        """Conta etapas distintas por cliente, não apenas clientes com resultado."""
+        return sum(
+            len({cls._subtest_category(message) for message in messages})
+            for _, messages in clients
+        )
+
+    @staticmethod
     def _render_categorized_messages(messages: list[str], status: str) -> str:
         """Agrupa mensagens marcadas por etapa em subtestes expansíveis."""
         categories: dict[str, list[str]] = {}
@@ -261,7 +279,7 @@ class ClientValidationReport:
                 .removeprefix("Detalhe: ")
             )
             category_match = re.match(r"^\[([^\]]+)\]\s*(.*)$", content, flags=re.DOTALL)
-            category = category_match.group(1) if category_match else "Geral"
+            category = ClientValidationReport._subtest_category(content)
             detail = category_match.group(2) if category_match else content
             categories.setdefault(category, []).append(detail)
 
@@ -338,7 +356,10 @@ class ClientValidationReport:
             elif current_section and current_client and line.startswith("  "):
                 sections[current_section][-1][1].append(line.strip())
 
-        counts = {name: len(items) for name, items in sections.items()}
+        counts = {
+            name: ClientValidationReport._count_subtests(items)
+            for name, items in sections.items()
+        }
 
         def render_clients(section_name: str, tone: str, empty_text: str) -> str:
             clients = sections[section_name]
@@ -477,7 +498,10 @@ class ClientValidationReport:
             "Aprovados": ("#16734a", "#edf9f2"),
         }
         totals = {
-            section: sum(len(sections[section]) for _, sections in groups)
+            section: sum(
+                ClientValidationReport._count_subtests(sections[section])
+                for _, sections in groups
+            )
             for section in tones
         }
 
@@ -500,7 +524,7 @@ class ClientValidationReport:
             f'<details class="test"><summary><h2>{escape(test_name)}</h2></summary>'
             + "".join(
                 f'<details class="status"><summary><h3>{section} '
-                f'({len(sections[section])})</h3></summary>'
+                f'({ClientValidationReport._count_subtests(sections[section])})</h3></summary>'
                 f'{render_clients(section, sections[section])}</details>'
                 for section in tones
             )
@@ -539,7 +563,8 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         sections = ClientValidationReport._parse_sections(report)
         metrics = "".join(
             f'<td style="padding:12px;border-top:4px solid {color};background:{background};">'
-            f'<strong>{name}</strong><br><span style="font-size:24px;">{len(sections[name])}</span></td>'
+            f'<strong>{name}</strong><br><span style="font-size:24px;">'
+            f'{ClientValidationReport._count_subtests(sections[name])}</span></td>'
             for name, color, background in (
                 ("Falhas", "#b42318", "#fff1f0"),
                 ("Informativos", "#9a6700", "#fff8e6"),
@@ -625,7 +650,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             return (
                 f'<details style="margin-top:26px;">'
                 f'<summary style="cursor:pointer;font:700 18px Arial,sans-serif;color:#17202a;">'
-                f'{name} ({len(clients)})</summary>'
+                f'{name} ({ClientValidationReport._count_subtests(clients)})</summary>'
                 f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
                 f'style="border-collapse:collapse;margin-top:10px;">{content}</table>'
                 '</details>'
@@ -641,7 +666,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             f'background:{background};font-family:Arial,sans-serif;">'
             f'<div style="font-size:12px;font-weight:bold;color:#64717d;text-transform:uppercase;">{name}</div>'
             f'<div style="font-size:30px;font-weight:bold;color:{color};margin-top:4px;">'
-            f'{len(sections[name])}</div></td>'
+            f'{ClientValidationReport._count_subtests(sections[name])}</div></td>'
             for name, color, background in metrics
         )
         generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")

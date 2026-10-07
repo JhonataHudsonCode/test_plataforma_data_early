@@ -113,7 +113,7 @@ class ClientValidationReport:
                 ("Aprovados", "Detalhe"),
             ):
                 clients = sections[section]
-                lines.append(f"{section} ({len(clients)}):")
+                lines.append(f"{section} ({cls._count_subtests(clients)}):")
                 for client_id, messages in clients:
                     lines.append(f"- Cliente: {client_id}")
                     lines.extend(
@@ -166,7 +166,7 @@ class ClientValidationReport:
             ("Aprovados", "Detalhe"),
         ):
             clients = sections[title]
-            lines.append(f"{title} ({len(clients)}):")
+            lines.append(f"{title} ({self._count_subtests(clients)}):")
             for client_id, messages in clients:
                 lines.append(f"- Cliente: {client_id}")
                 lines.extend(
@@ -273,7 +273,10 @@ class ClientValidationReport:
             output_path.write_text(html, encoding="utf-8")
             return html
 
-        counts = {name: len(clients) for name, clients in sections.items()}
+        counts = {
+            name: ClientValidationReport._count_subtests(clients)
+            for name, clients in sections.items()
+        }
 
         def cards(section: str, tone: str, empty: str) -> str:
             clients = sections[section]
@@ -345,7 +348,10 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             "Aprovados": ("#16734a", "#edf9f2"),
         }
         totals = {
-            section: sum(len(sections[section]) for _, sections in groups)
+            section: sum(
+                ClientValidationReport._count_subtests(sections[section])
+                for _, sections in groups
+            )
             for section in tones
         }
 
@@ -367,7 +373,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         tests_html = "".join(
             f'<details class="test"><summary><h2>{escape(test_name)}</h2></summary>'
             + "".join(
-                f'<details class="status"><summary>{section} ({len(sections[section])})</summary>'
+                f'<details class="status"><summary>{section} ({ClientValidationReport._count_subtests(sections[section])})</summary>'
                 f'{render_clients(section, sections[section])}</details>'
                 for section in tones
             )
@@ -420,7 +426,8 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         sections = ClientValidationReport._parse_sections(report)
         metrics = "".join(
             f'<td style="padding:12px;border-top:4px solid {color};background:{background};">'
-            f'<strong>{name}</strong><br><span style="font-size:24px;">{len(sections[name])}</span></td>'
+            f'<strong>{name}</strong><br><span style="font-size:24px;">'
+            f'{ClientValidationReport._count_subtests(sections[name])}</span></td>'
             for name, color, background in (
                 ("Falhas", "#b42318", "#fff1f0"),
                 ("Informativos", "#9a6700", "#fff8e6"),
@@ -471,7 +478,7 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
             return (
                 f'<details style="margin-top:26px;">'
                 f'<summary style="cursor:pointer;font:700 18px Arial,sans-serif;color:#17202a;">'
-                f'{name} ({len(sections[name])})</summary>'
+                f'{name} ({ClientValidationReport._count_subtests(sections[name])})</summary>'
                 f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
                 f'style="border-collapse:collapse;margin-top:10px;">{rows}</table>'
                 '</details>'
@@ -480,7 +487,8 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         metrics = "".join(
             f'<td width="33%" style="padding:14px 12px;border-top:4px solid {color};background:{background};font-family:Arial,sans-serif;">'
             f'<div style="font-size:12px;font-weight:bold;color:#64717d;">{name.upper()}</div>'
-            f'<div style="font-size:30px;font-weight:bold;color:{color};margin-top:4px;">{len(sections[name])}</div></td>'
+            f'<div style="font-size:30px;font-weight:bold;color:{color};margin-top:4px;">'
+            f'{ClientValidationReport._count_subtests(sections[name])}</div></td>'
             for name, (color, background) in tones.items()
         )
         generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -528,6 +536,14 @@ body{{margin:0;background:#eef2f5;color:#17202a;font:14px/1.5 Arial,sans-serif}}
         if category is None:
             return "Geral", message
         return category.group(1), category.group(2)
+
+    @classmethod
+    def _count_subtests(cls, clients: list[tuple[str, list[str]]]) -> int:
+        """Conta etapas distintas por cliente, não apenas clientes com resultado."""
+        return sum(
+            len({cls._split_message_category(message)[0] for message in messages})
+            for _, messages in clients
+        )
 
     @staticmethod
     def _render_plain_message(message: str) -> str:
