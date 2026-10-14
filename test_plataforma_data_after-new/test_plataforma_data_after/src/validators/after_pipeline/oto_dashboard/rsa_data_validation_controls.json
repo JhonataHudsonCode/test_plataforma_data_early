@@ -1,0 +1,8 @@
+{
+  "value_fields": [
+    "current_score_rsa",
+    "estimate_new_score_by_rsa",
+    "impact"
+  ],
+  "variation_control_prefix": "rsa_data."
+}

@@ -1,0 +1,308 @@
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta
+from src.connections.opensearch_factory import OpenSearchConnectionFactory
+from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
+from src.models.opensearch_client.opensearch_index_metadata import OpenSearchIndexMetadata
+from opensearchpy.exceptions import OpenSearchException
+from typing import Any
+
+
+logger = logging.getLogger(__name__)
+
+
+class OpenSearchClientRepository:
+    """Valida índices RSA no OpenSearch específico de cada cliente."""
+
+    def __init__(self, connection_factory: OpenSearchConnectionFactory) -> None:
+        self._connection_factory = connection_factory
+
+    def check_connection(self, client_host: str) -> bool:
+        """Verifica se o OpenSearch do cliente responde no endpoint informado."""
+        connection = None
+        try:
+            connection = self._connection_factory.create_for_host(client_host)
+            return bool(connection.client.ping())
+        except Exception as error:
+            logger.warning(
+                "Falha ao conectar ao OpenSearch do cliente em %s: %s",
+                client_host,
+                error,
+            )
+            return False
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def get_indices_rsa(
+        self,
+        client_host: str,
+        index_name: str,
+    ) -> list[VulnerabilityIndex]:
+        connection = self._connection_factory.create_for_host(client_host)
+
+        try:
+            connection.client.info()
+            logger.info(
+                "Conexão com o OpenSearch do cliente realizada em %s.",
+                client_host,
+            )
+            indices = connection.client.cat.indices(
+                index=index_name,
+                format="json",
+                h="index,docs.count",
+                expand_wildcards="all"
+            )
+        finally:
+            connection.close()
+
+        found_indices = [
+            VulnerabilityIndex(
+                name=item["index"],
+                document_count=self._parse_document_count(item.get("docs.count")),
+            )
+            for item in indices
+            if item.get("index")
+        ]
+
+        logger.info(
+            "Índice RSA esperado no host %s: %s. Índices encontrados: %s",
+            client_host,
+            index_name,
+            [index.name for index in found_indices],
+        )
+        return found_indices
+
+    def get_indices_elastalerts_status_today(
+            self,
+            client_host: str,
+            index_name: str
+        ) -> list[VulnerabilityIndex]:
+            connection = self._connection_factory.create_for_host(client_host)
+    
+            try:
+                connection.client.info()
+                logger.info(
+                    "Conexão com o OpenSearch do cliente realizada em %s.",
+                    client_host,
+                )
+                indices = connection.client.cat.indices(
+                    index=index_name,
+                    format="json",
+                    h="index,docs.count",
+                    expand_wildcards="all"
+                )
+            finally:
+                connection.close()
+    
+            found_indices = [
+                VulnerabilityIndex(
+                    name=item["index"],
+                    document_count=self._parse_document_count(item.get("docs.count")),
+                )
+                for item in indices
+                if item.get("index")
+            ]
+            
+            logger.info(
+                "Índice RSA esperado no host %s: %s. Índices encontrados: %s",
+                client_host,
+                index_name,
+                [index.name for index in found_indices],
+            )
+            return found_indices
+
+    def get_documents(
+            self,
+            client_host: str,
+            index_name: str,
+            size: int = 10000,
+            sort_by_timestamp: bool = False,
+        ) -> list[dict[str, Any]]:
+            """Retorna documentos de um índice RSA do OpenSearch do cliente."""
+            connection = self._connection_factory.create_for_host(client_host)
+
+            try:
+                body: dict[str, Any] = {
+                    "size": size,
+                    "query": {"match_all": {}},
+                }
+                if sort_by_timestamp:
+                    body["sort"] = [{"@timestamp": {"order": "desc"}}]
+                response = connection.client.search(
+                    index=index_name,
+                    body=body,
+                )
+            except Exception as error:
+                message = (
+                    f"Não foi possível buscar documentos do índice '{index_name}' "
+                    f"no host '{client_host}': {error.__class__.__name__}: {error}"
+                )
+                logger.exception(message)
+                raise RuntimeError(message) from error
+            finally:
+                connection.close()
+
+            return response['hits']['hits']
+
+    def get_documents_by_timestamp_match(
+        self,
+        client_host: str,
+        index_name: str,
+        reference_date: date,
+        size: int = 10_000,
+    ) -> list[dict[str, Any]]:
+        """Retorna os documentos cujo `@timestamp` corresponde à data informada."""
+        connection = self._connection_factory.create_for_host(client_host)
+        try:
+            response = connection.client.search(
+                index=index_name,
+                body={
+                    "size": size,
+                    "query": {"match": {"@timestamp": reference_date.isoformat()}},
+                },
+            )
+        except Exception as error:
+            message = (
+                f"Não foi possível buscar documentos do índice '{index_name}' "
+                f"com @timestamp em '{reference_date.isoformat()}' no host "
+                f"'{client_host}': {error.__class__.__name__}: {error}"
+            )
+            logger.exception(message)
+            raise RuntimeError(message) from error
+        finally:
+            connection.close()
+
+        return response.get("hits", {}).get("hits", [])
+
+    def get_documents_by_timestamp_range(
+        self,
+        client_host: str,
+        index_name: str,
+        start_date: date,
+        end_date: date,
+        size: int = 10_000,
+    ) -> list[dict[str, Any]]:
+        """Retorna documentos com ``@timestamp`` dentro do intervalo informado."""
+        connection = self._connection_factory.create_for_host(client_host)
+        try:
+            response = connection.client.search(
+                index=index_name,
+                body={
+                    "size": size,
+                    "sort": [{"@timestamp": {"order": "desc"}}],
+                    "query": {
+                        "range": {
+                            "@timestamp": {
+                                "gte": start_date.isoformat(),
+                                "lt": (end_date + timedelta(days=1)).isoformat(),
+                            }
+                        }
+                    },
+                },
+            )
+        except Exception as error:
+            message = (
+                f"Não foi possível buscar documentos do índice '{index_name}' "
+                f"entre '{start_date.isoformat()}' e '{end_date.isoformat()}' no host "
+                f"'{client_host}': {error.__class__.__name__}: {error}"
+            )
+            logger.exception(message)
+            raise RuntimeError(message) from error
+        finally:
+            connection.close()
+
+        return response.get("hits", {}).get("hits", [])
+
+    def get_index_mapping(
+        self,
+        client_host: str,
+        index_name: str,
+    ) -> dict[str, Any]:
+        """Retorna o mapping obtido pela API _mapping do índice."""
+        connection = self._connection_factory.create_for_host(client_host)
+        try:
+            response = connection.client.indices.get_mapping(index=index_name)
+        except Exception as error:
+            message = (
+                f"Não foi possível consultar o mapping do índice '{index_name}' "
+                f"no host '{client_host}': {error.__class__.__name__}: {error}"
+            )
+            logger.exception(message)
+            raise RuntimeError(message) from error
+        finally:
+            connection.close()
+
+        index_mapping = response.get(index_name, {}).get("mappings", {})
+        return index_mapping if isinstance(index_mapping, dict) else {}
+
+    def get_index_metadata(
+        self,
+        client_host: str,
+        index_name: str,
+    ) -> OpenSearchIndexMetadata:
+        """Retorna mapping e data de criação de um índice RSA."""
+        connection = self._connection_factory.create_for_host(client_host)
+
+        try:
+            mapping_response = connection.client.indices.get_mapping(index=index_name)
+            settings_response = connection.client.indices.get_settings(index=index_name)
+        finally:
+            connection.close()
+
+        mapping = mapping_response[index_name]["mappings"]
+        creation_date = settings_response[index_name]["settings"]["index"][
+            "creation_date"
+        ]
+        return OpenSearchIndexMetadata(
+            name=index_name,
+            created_at=datetime.fromtimestamp(int(creation_date) / 1000),
+            mapping=mapping,
+        )
+
+    def get_indices_axur(
+           self,
+           client_host: str,
+           index_name: str
+       ) -> list[VulnerabilityIndex]:
+           connection = self._connection_factory.create_for_host(client_host)
+   
+           try:
+               connection.client.info()
+               logger.info(
+                   "Conexão com o OpenSearch do cliente realizada em %s.",
+                   client_host,
+               )
+               indices = connection.client.cat.indices(
+                   index=index_name,
+                   format="json",
+                   h="index,docs.count",
+                   expand_wildcards="all"
+               )
+           finally:
+               connection.close()
+   
+           found_indices = [
+               VulnerabilityIndex(
+                   name=item["index"],
+                   document_count=self._parse_document_count(item.get("docs.count")),
+               )
+               for item in indices
+               if item.get("index")
+           ]
+   
+           logger.info(
+               "Índice RSA esperado no host %s: %s. Índices encontrados: %s",
+               client_host,
+               index_name,
+               [index.name for index in found_indices],
+           )
+           return found_indices
+   
+
+    @staticmethod
+    def _parse_document_count(value: object) -> int:
+        if value in {None, "", "-"}:
+            return 0
+        return int(value)

@@ -1,0 +1,5 @@
+# Arquivos compactados locais dos projetos importados.
+*.zip
+
+# Metadado Git local preservado ao migrar a raiz do workspace.
+test_plataforma_data_after-new/test_plataforma_data_after/.git.after-backup/

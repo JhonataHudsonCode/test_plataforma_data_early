@@ -1,0 +1,7 @@
+{
+    "name": "test-plataforma-data-after",
+    "private": true,
+    "devDependencies": {
+        "allure-commandline": "2.43.0"
+    }
+}

@@ -1,0 +1,77 @@
+{
+  "objects": {
+    "historical": {
+      "validation": "historical",
+      "date_field": "date",
+      "value_field": "score",
+      "variation_control": "score_data.historical.score"
+    },
+    "current_score": {
+      "validation": "score_values",
+      "object_name": "current_score",
+      "value_fields": [
+        "rsa",
+        "score",
+        "vulnerabilities",
+        "siem",
+        "cis",
+        "threat_intelligence",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.current_score."
+    },
+    "predition_score": {
+      "validation": "score_values",
+      "object_name": "predition_score",
+      "value_fields": [
+        "rsa",
+        "score",
+        "vulnerabilities",
+        "siem",
+        "cis",
+        "threat_intelligence",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.prediction_score."
+    },
+    "estimate_new_score": {
+      "validation": "estimate_new_score",
+      "object_name": "estimate_new_score",
+      "value_fields": [
+        "rsa",
+        "score",
+        "vulnerabilities",
+        "threat_intelligence",
+        "siem",
+        "cis",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.estimate_new_score."
+    },
+    "impact": {
+      "validation": "impact",
+      "object_name": "impact",
+      "value_fields": [
+        "rsa",
+        "vulnerabilities",
+        "threat_intelligence",
+        "siem",
+        "cis",
+        "assessment"
+      ],
+      "variation_control_prefix": "score_data.impact."
+    },
+    "variation_data": {
+      "validation": "variation_data",
+      "value_fields": [
+        "vulnerabilities",
+        "rsa",
+        "siem",
+        "cis",
+        "threat_intelligence",
+        "assessment"
+      ],
+      "nested_value_fields": ["current", "past", "variation"]
+    }
+  }
+}

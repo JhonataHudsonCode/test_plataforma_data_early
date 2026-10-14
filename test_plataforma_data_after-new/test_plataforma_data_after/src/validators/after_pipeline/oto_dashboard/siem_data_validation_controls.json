@@ -1,0 +1,14 @@
+{
+  "value_fields": {
+    "current_siem_score": "float",
+    "estimate_new_score_by_siem": "float",
+    "impact": "float"
+  },
+  "object_name": "improvement",
+  "fields": {
+    "waiting_client_rate": "float",
+    "incident_rate": "float",
+    "observability_increment": "int"
+  },
+  "variation_control_prefix": "siem_data.improvement."
+}
