@@ -103,21 +103,22 @@ class RulesIndexValidator:
                 )
                 return ClientValidationResult(target.client_id, failures=failures, details=details)
 
-            documents = self._opensearch_repository.get_documents(
+            documents = self._opensearch_repository.get_documents_by_timestamp_match(
                 host,
                 RULES_INDEX_NAME,
-                sort_by_timestamp=True,
+                self._reference_date,
             )
 
             details.append(
-                f"[Geral] Índice rules encontrado com {index.document_count} documento(s)."
+                f"[Timestamp] Índice rules | consulta por @timestamp em "
+                f"{self._reference_date.isoformat()} retornou {len(documents)} documento(s)."
             )
 
             if not documents:
                 failures.append(
                     f"[Timestamp] Cliente '{target.client_id}' | host '{host}' | índice rules "
-                    "possui documentos na listagem, mas não retornou documento para validar "
-                    "@timestamp."
+                    f"não retornou documentos com @timestamp em "
+                    f"{self._reference_date.isoformat()}."
                 )
                 return ClientValidationResult(
                     target.client_id, failures=failures, details=details
