@@ -1,0 +1,2183 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+import json
+import math
+from pathlib import Path
+import re
+from collections.abc import Callable
+from typing import Any, Iterable
+
+from src.config.settings import ClientTarget
+from src.models.opensearch_product.asset_compliance_mapping import (
+    EXPECTED_ASSET_COMPLIANCE_MAPPING,
+)
+from src.models.opensearch_product.asset_historical_observability_mapping import (
+    EXPECTED_ASSET_HISTORICAL_OBSERVABILITY_MAPPING,
+)
+from src.models.opensearch_product.asset_historical_software_mapping import (
+    EXPECTED_ASSET_HISTORICAL_SOFTWARE_MAPPING,
+)
+from src.models.opensearch_product.asset_policy_compliance_mapping import (
+    EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+)
+from src.models.opensearch_product.client_asset_mapping import EXPECTED_CLIENT_ASSET_MAPPING
+from src.models.opensearch_product.software_policy_mapping import (
+    EXPECTED_SOFTWARE_POLICY_MAPPING,
+)
+from src.models.opensearch_product.score_history_mapping import (
+    EXPECTED_SCORE_HISTORY_MAPPING,
+)
+from src.models.opensearch_product.oto_dashboard_mapping import (
+    EXPECTED_OTO_DASHBOARD_MAPPING,
+)
+from src.models.opensearch_product.vulnerability_index import VulnerabilityIndex
+from src.repositories.cognito_client_repository import CognitoClientRepository
+from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
+from src.validators.after_pipeline.oto_dashboard.document_validator import (
+    OtoDashboardDocumentValidator,
+)
+from src.validators.after_pipeline.asset_compliance_document_validator import (
+    AssetComplianceDocumentValidator,
+)
+from src.validators.after_pipeline.asset_policy_compliance_document_validator import (
+    AssetPolicyComplianceDocumentValidator,
+)
+from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
+
+
+@dataclass(frozen=True, slots=True)
+class _IndexDocuments:
+    """Documentos já consultados durante a validação de um índice."""
+
+    latest: dict[str, Any]
+    previous: dict[str, Any] | None
+
+
+class _CategorizedMessages:
+    """Encaminha mensagens ao report preservando a etapa que as produziu."""
+
+    def __init__(self, messages: list[str], category: str) -> None:
+        self._messages = messages
+        self._category = category
+
+    def append(self, message: str) -> None:
+        self._messages.append(f"[{self._category}] {message}")
+
+    def extend(self, messages: Iterable[str]) -> None:
+        self._messages.extend(f"[{self._category}] {message}" for message in messages)
+
+
+class ProductDataValidator:
+    """Valida a aplicação do módulo no Cognito e a atualização de seus índices."""
+
+    _SCORE_HISTORY_FIELDS: tuple[tuple[str, str | None], ...] = (
+        ("score", None),
+        ("vulnerabilities", None),
+        ("rsa", "has_rsa"),
+        ("siem", "has_wazuh"),
+        ("cls", None),
+        ("cls_alta", None),
+        ("cls_media", None),
+    )
+    _SCORE_HISTORY_PERCENTAGE_FIELDS: tuple[str, ...] = (
+        "score",
+        "vulnerabilities",
+        "rsa",
+        "siem",
+        "cis",
+        "cis_alta",
+        "cis_media",
+        "cis_baixa",
+        "axur",
+        "siem_waiting_client_score",
+        "siem_incident_score",
+        "siem_observability_score",
+        "siem_final_score",
+        "siem_observability_data.total_missing_categories",
+        "siem_observability_data.total_observability_categories",
+        "siem_observability_data.observability_categories",
+        "assessment_final_score",
+        "global_score_comparison",
+        "sector_score_comparison",
+        "global_score_average",
+        "sector_score_average",
+    )
+    def __init__(
+        self,
+        repository: OpenSearchVulnerabilityRepository,
+        cognito_repository: CognitoClientRepository,
+        reference_date: date | None = None,
+    ) -> None:
+        self._repository = repository
+        self._cognito_repository = cognito_repository
+        self._reference_date = reference_date or date.today()
+        self._oto_dashboard_document_validator = OtoDashboardDocumentValidator(
+            self._reference_date
+        )
+        self._asset_compliance_document_validator = AssetComplianceDocumentValidator()
+        self._asset_policy_compliance_document_validator = (
+            AssetPolicyComplianceDocumentValidator()
+        )
+
+    def validate_assets(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+
+        historical_mappings = {
+            "asset-historical-observability": EXPECTED_ASSET_HISTORICAL_OBSERVABILITY_MAPPING,
+            "asset-historical-software": EXPECTED_ASSET_HISTORICAL_SOFTWARE_MAPPING,
+        }
+        for suffix, expected_mapping in historical_mappings.items():
+            index_name = f"{target.client_id}_{suffix}"
+            self._validate_assets_variation(
+                index_name,
+                expected_mapping,
+                errors,
+                details,
+            )
+        return errors, details
+
+    def validate_current_asset_index(
+        self,
+        target: ClientTarget,
+    ) -> tuple[list[str], list[str]]:
+        """Valida todos os documentos do índice diário de ativos atual."""
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+
+        self._validate_current_asset_index(
+            target.client_id,
+            "@timestamp",
+            EXPECTED_CLIENT_ASSET_MAPPING,
+            errors,
+            details,
+        )
+        return errors, details
+
+    def validate_compliance(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "has_wazuh")
+        if client is None:
+            return errors, details
+
+        compliance_validations = {
+            "asset-compliance": (
+                EXPECTED_ASSET_COMPLIANCE_MAPPING,
+                (
+                    ("fail", "increase"),
+                    ("success", "decrease"),
+                    ("pct_score", "decrease"),
+                    ("total_checks", "decrease"),
+                    ("invalid", "increase"),
+                ),
+            ),
+            "asset-policy-compliance": (
+                EXPECTED_ASSET_POLICY_COMPLIANCE_MAPPING,
+                (("passed.count", "decrease"), ("fail.count", "increase")),
+            ),
+        }
+        for suffix, (expected_mapping, variation_rules) in compliance_validations.items():
+            self._validate_compliance_variation(
+                f"{target.client_id}_{suffix}",
+                expected_mapping,
+                variation_rules,
+                errors,
+                details,
+            )
+        return errors, details
+
+    def validate_software_policies(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "has_asset")
+        if client is None:
+            return errors, details
+
+        for suffix in ("authorized-software", "mandatory-software"):
+            self._validate_documents_by_reference_date(
+                f"{target.client_id}_{suffix}",
+                "lastUpdated",
+                EXPECTED_SOFTWARE_POLICY_MAPPING,
+                errors,
+                details,
+            )
+        return errors, details
+
+    def validate_score_history(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(target, "is_in_platform")
+        if client is None:
+            return errors, details
+
+        self._validate_score_history_by_reference_date(
+            f"{target.client_id}_score_history",
+            errors,
+            details,
+        )
+        return errors, details
+
+    def _validate_score_history_by_reference_date(
+        self,
+        index_name: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara os totais de score_history retornados para hoje e ontem."""
+        previous_date = self._reference_date - timedelta(days=1)
+        general_errors = _CategorizedMessages(errors, "Geral")
+        current_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            self._reference_date,
+            general_errors,
+            timestamp_field="date",
+        )
+
+        previous_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            previous_date,
+            general_errors,
+            timestamp_field="date",
+        )
+        if current_documents is None or previous_documents is None:
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' encontrado com sucesso"
+        )
+
+        details.append(
+            f"[Timestamp] Índice '{index_name}' | consulta por date retornou "
+            f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
+            f"{len(previous_documents)} em {previous_date.isoformat()}."
+        )
+
+        documents = [*current_documents, *previous_documents]
+        if documents:
+            self._run_validation_stage(
+                "Mapping",
+                errors,
+                details,
+                lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                    documents,
+                    EXPECTED_SCORE_HISTORY_MAPPING,
+                    stage_errors,
+                    stage_details,
+                    group_errors_by_document=True,
+                ),
+            )
+        else:
+            errors.append(
+                f"[Mapping] Índice '{index_name}' não retornou documentos para validar mapping."
+            )
+
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_score_history_dates(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        if not current_documents or not previous_documents:
+            errors.append(
+                f"[Comparação percentual] Índice '{index_name}' sem documentos nas duas "
+                "datas necessárias para comparar os scores."
+            )
+            return
+
+        self._run_validation_stage(
+            "Score",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_positive_scores(
+                index_name,
+                documents,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+        totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: totals.update(
+                self._capture_score_history_totals(
+                    index_name,
+                    current_documents,
+                    previous_documents,
+                    stage_errors,
+                    stage_details,
+                )
+            ),
+        )
+        if not totals:
+            return
+
+        current_totals, previous_totals, invalid_fields = totals["totals"]
+        valid_fields = tuple(
+            field
+            for field in self._SCORE_HISTORY_PERCENTAGE_FIELDS
+            if field not in invalid_fields
+        )
+        if not valid_fields:
+            return
+
+        self._run_validation_stage(
+            "Comparação percentual",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_absolute_fifty_percent_variation(
+                index_name,
+                tuple(
+                    (field, current_totals[field], previous_totals[field])
+                    for field in valid_fields
+                ),
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+    def _validate_score_history_dates(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if not current_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com date em "
+                f"{self._reference_date.isoformat()}."
+            )
+        else:
+            self._validate_documents_for_date(
+                index_name,
+                current_documents,
+                "date",
+                self._reference_date,
+                errors,
+                details,
+            )
+
+        if not previous_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com date em "
+                f"{previous_date.isoformat()}."
+            )
+            return
+        self._validate_documents_for_date(
+            index_name,
+            previous_documents,
+            "date",
+            previous_date,
+            errors,
+            details,
+        )
+
+    def _capture_score_history_totals(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, tuple[dict[str, float], dict[str, float], set[str]]]:
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name,
+            current_documents,
+            self._SCORE_HISTORY_PERCENTAGE_FIELDS,
+            errors,
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name,
+            previous_documents,
+            self._SCORE_HISTORY_PERCENTAGE_FIELDS,
+            errors,
+        )
+        return {
+            "totals": (
+                current_totals,
+                previous_totals,
+                current_invalid_fields | previous_invalid_fields,
+            )
+        }
+
+    def validate_oto_dashboard(self, target: ClientTarget) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(
+            target,
+            "client_type",
+            "saas",
+        )
+        if client is None:
+            return errors, details
+
+        self._validate_dated_oto_dashboard_indices(target.client_id, errors, details)
+        return errors, details
+
+    def _validate_score_history(
+        self,
+        index_name: str,
+        client: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida os scores atual e anterior, mesmo quando o atual está atrasado."""
+        try:
+            candidates = self._repository.get_indices_with_optional_date(
+                index_name,
+                self._reference_date,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao localizar candidatos: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+        if not candidates:
+            errors.append(f"Índice '{index_name}' não encontrado.")
+            return
+
+        index = candidates[0]
+        if index.document_count <= 0:
+            errors.append(f"Índice '{index.name}' não possui documentos.")
+            return
+
+        document = self._get_latest_document(index.name, "date", errors)
+        if document is None:
+            return
+        latest_date = self._get_document_date(index.name, document, "date", errors)
+        if latest_date is None:
+            return
+
+        if latest_date != self._reference_date:
+            errors.append(
+                f"Índice '{index.name}' | documento mais recente com date "
+                f"{latest_date.isoformat()}; último dia encontrado: {latest_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+        else:
+            details.append(
+                f"Índice '{index.name}' | dados de hoje presentes: "
+                f"date={latest_date.isoformat()}."
+            )
+
+        latest_timestamp = self._source(document).get("date")
+        if not isinstance(latest_timestamp, str):
+            errors.append(
+                f"Índice '{index.name}' | documento mais recente sem date válido."
+            )
+            return
+        previous_documents = self._get_previous_day_documents(
+            index.name,
+            latest_timestamp,
+            "date",
+            latest_date,
+            errors,
+        )
+        if previous_documents is None:
+            return
+        if not previous_documents:
+            errors.append(
+                f"Índice '{index.name}' não possui documento no dia anterior "
+                f"ao mais recente ({(latest_date - timedelta(days=1)).isoformat()})."
+            )
+            return
+
+        previous_document = previous_documents[0]
+        previous_date = self._get_document_date(
+            index.name,
+            previous_document,
+            "date",
+            errors,
+        )
+        expected_previous_date = latest_date - timedelta(days=1)
+        if previous_date != expected_previous_date:
+            errors.append(
+                f"Índice '{index.name}' | documento histórico com date "
+                f"{previous_date.isoformat() if previous_date else 'não informado'}; esperado "
+                f"{expected_previous_date.isoformat()}."
+            )
+            return
+        self._validate_score_history_fields(
+            index.name,
+            document,
+            previous_document,
+            client,
+            errors,
+            details,
+        )
+
+    def _validate_dated_oto_dashboard_indices(
+        self,
+        client_id: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Consulta o OTO pelo índice base e compara os documentos de cada data."""
+        index_name = f"{client_id}_oto_dashboard_*"
+        previous_date = self._reference_date - timedelta(days=1)
+        general_errors = _CategorizedMessages(errors, "Geral")
+        current_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            self._reference_date,
+            general_errors,
+            timestamp_field="@timestamp",
+        )
+        previous_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            previous_date,
+            general_errors,
+            timestamp_field="@timestamp",
+        )
+        if current_documents is None or previous_documents is None:
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' encontrado com sucesso"
+        )
+            
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por @timestamp retornou "
+            f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
+            f"{len(previous_documents)} em {previous_date.isoformat()}."
+        )
+
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por @timestamp retornou "
+            f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
+        )
+        
+
+        documents = [*current_documents, *previous_documents]
+        if documents:
+            self._run_validation_stage(
+                "Mapping",
+                errors,
+                details,
+                lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                    documents,
+                    EXPECTED_OTO_DASHBOARD_MAPPING,
+                    stage_errors,
+                    stage_details,
+                    group_errors_by_document=True,
+                ),
+            )
+        else:
+            errors.append(
+                f"[Mapping] Índice '{index_name}' não retornou documentos para validar mapping."
+            )
+
+        self._run_validation_stage(
+            "Timestamp",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_oto_timestamp_documents(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        if not current_documents or not previous_documents:
+            errors.append(
+                f"[Comparação percentual] Índice '{index_name}' sem documentos nas duas "
+                "datas necessárias para comparar percentuais."
+            )
+            return
+
+        current_document = current_documents[0]
+        previous_document = previous_documents[0]
+        metric_index_name = str(current_document.get("_index", index_name))
+        self._run_validation_stage(
+            "Comparação percentual",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_oto_dashboard_metrics(
+                metric_index_name,
+                current_document,
+                previous_document,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+    def _validate_oto_timestamp_documents(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if not current_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com @timestamp em "
+                f"{self._reference_date.isoformat()}."
+            )
+        else:
+            self._validate_documents_for_date(
+                index_name,
+                current_documents,
+                "@timestamp",
+                self._reference_date,
+                errors,
+                details,
+            )
+        if not previous_documents:
+            errors.append(
+                f"Índice '{index_name}' não retornou documentos com @timestamp em "
+                f"{previous_date.isoformat()}."
+            )
+            return
+        self._validate_documents_for_date(
+            index_name,
+            previous_documents,
+            "@timestamp",
+            previous_date,
+            errors,
+            details,
+        )
+
+    def _validate_oto_dashboard_metrics(
+        self,
+        index_name: str,
+        latest_document: dict[str, Any],
+        previous_document: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Delega a comparação do `_source` ao validador específico do OTO."""
+        self._oto_dashboard_document_validator.validate(
+            index_name,
+            self._source(latest_document),
+            self._source(previous_document),
+            errors,
+            details,
+        )
+
+    def _validate_score_history_fields(
+        self,
+        index_name: str,
+        latest_document: dict[str, Any],
+        previous_document: dict[str, Any],
+        client: dict[str, Any],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida valores válidos e variação máxima de 50% nos scores aplicáveis."""
+        latest_source = self._source(latest_document)
+        previous_source = self._source(previous_document)
+        for field_name, required_flag in self._SCORE_HISTORY_FIELDS:
+            if required_flag is not None and not bool(client.get(required_flag)):
+                details.append(
+                    f"Índice '{index_name}' | score {field_name} não aplicável: "
+                    f"{required_flag} desabilitado."
+                )
+                continue
+
+            latest_value = latest_source.get(field_name)
+            previous_value = previous_source.get(field_name)
+            if not self._is_valid_score(latest_value):
+                errors.append(
+                    f"Índice '{index_name}' | score {field_name} inválido no documento "
+                    f"mais recente: {latest_value!r}. Valores 0 e -1 não são permitidos."
+                )
+                continue
+            if not self._is_valid_score(previous_value):
+                errors.append(
+                    f"Índice '{index_name}' | score {field_name} inválido no documento "
+                    f"do dia anterior: {previous_value!r}."
+                )
+                continue
+
+            self._validate_score_history_variation(
+                index_name,
+                field_name,
+                float(latest_value),
+                float(previous_value),
+                errors,
+                details,
+            )
+
+    def _validate_score_history_variation(
+        self,
+        index_name: str,
+        field_name: str,
+        latest_value: float,
+        previous_value: float,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Sinaliza alteração absoluta acima de 50% entre scores consecutivos."""
+        variation = abs(latest_value - previous_value) / abs(previous_value)
+        details.append(
+            f"Índice '{index_name}' | score {field_name}: anterior={previous_value}, "
+            f"mais recente={latest_value}, variação={variation:.0%}."
+        )
+        if variation > 0.5:
+            errors.append(
+                f"Índice '{index_name}' | score {field_name} variou {variation:.0%} "
+                f"(anterior={previous_value}, mais recente={latest_value}); "
+                "máximo permitido: 50%."
+            )
+
+    def _validate_module_indices(
+        self,
+        target: ClientTarget,
+        expected_flag: str,
+        index_definitions: Iterable[tuple[str, str]],
+        validate_creation_date: bool = False,
+        compare_previous_day: bool = True,
+        expected_value: object = True,
+        expected_mappings: dict[str, dict[str, str | dict[str, Any]]] | None = None,
+    ) -> tuple[list[str], list[str]]:
+        client, errors, details = self._get_applicable_client(
+            target,
+            expected_flag,
+            expected_value,
+        )
+        if client is None:
+            return errors, details
+
+        for suffix, timestamp_field in index_definitions:
+            index_name = f"{target.client_id}_{suffix}"
+            self._validate_index_with_optional_date_suffix(
+                index_name,
+                timestamp_field,
+                errors,
+                details,
+                validate_creation_date,
+                compare_previous_day,
+                expected_mappings.get(suffix) if expected_mappings else None,
+            )
+        return errors, details
+
+    def _validate_index_with_optional_date_suffix(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        errors: list[str],
+        details: list[str],
+        validate_creation_date: bool = False,
+        compare_previous_day: bool = True,
+        expected_mapping: dict[str, str | dict[str, Any]] | None = None,
+    ) -> None:
+        """Valida o índice fixo ou sua versão diária com data no sufixo."""
+        try:
+            candidate_indices = self._repository.get_indices_with_optional_date(
+                index_name,
+                self._reference_date,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao localizar candidatos: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        if not candidate_indices:
+            errors.append(
+                f"Índice '{index_name}' não encontrado, nem versão com data "
+                f"para {self._reference_date.isoformat()}."
+            )
+            return
+
+        details.append(
+            f"Índice '{index_name}' | candidatos selecionados: "
+            f"{', '.join(candidate.name for candidate in candidate_indices)}."
+        )
+        for candidate_index in candidate_indices:
+            if expected_mapping is not None:
+                self._validate_mapping(candidate_index.name, expected_mapping, errors, details)
+            if validate_creation_date:
+                self._validate_index_creation_date(candidate_index, errors, details)
+            else:
+                self._validate_index(
+                    candidate_index,
+                    timestamp_field,
+                    errors,
+                    details,
+                    compare_previous_day,
+                )
+
+    def _validate_index_creation_date(
+        self,
+        index: VulnerabilityIndex,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida somente a data de criação do índice já encontrado."""
+        self._validate_index_name_creation_date(index.name, errors, details)
+
+    def _validate_index_name_creation_date(
+        self,
+        index_name: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida a data de criação de um índice físico retornado pela busca."""
+        try:
+            metadata = self._repository.get_index_metadata(index_name)
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar data de criação: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        creation_date = metadata.created_at.date()
+        if creation_date != self._reference_date:
+            errors.append(
+                f"Índice '{index_name}' | criado em {metadata.created_at.isoformat()}; "
+                f"último dia encontrado: {creation_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+            return
+
+        details.append(
+            f"Índice '{index_name}' | creation_date validado: "
+            f"{metadata.created_at.isoformat()}."
+        )
+
+    def _validate_current_asset_index(
+        self,
+        client_id: str,
+        timestamp_field: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        index_name = f"{client_id}_asset"
+        document_errors = _CategorizedMessages(errors, "Documentos de hoje")
+        try:
+            documents = self._repository.get_documents_by_date_match(
+                index_name,
+                self._reference_date,
+                timestamp_field,
+            )
+
+            details.append(
+                f"[Geral] Índice '{index_name}' encontrado com sucesso"
+            )
+
+        except Exception as error:
+            document_errors.append(
+                f"Índice de ativos '{index_name}' | erro ao consultar documentos de "
+                f"{self._reference_date.isoformat()}: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        self._run_validation_stage(
+            "Mapping",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_mapping(
+                index_name,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+        if not documents:
+            document_errors.append(
+                f"Índice de ativos '{index_name}' não retornou documentos com "
+                f"{timestamp_field} em {self._reference_date.isoformat()}."
+            )
+            return
+
+        self._validate_documents_for_date(
+            index_name,
+            documents,
+            "@timestamp",
+            self._reference_date,
+            errors,
+            details,
+        )
+
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta em "
+            f"{self._reference_date.isoformat()} retornou {len(documents)} documento(s)."
+        )
+
+
+    def _validate_documents_by_reference_date(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Busca diretamente os documentos de hoje, sem resolver o índice por alias."""
+        general_errors = _CategorizedMessages(errors, "Geral")
+        try:
+            documents = self._repository.get_documents_by_date_match(
+                index_name,
+                self._reference_date,
+                timestamp_field,
+            )
+        except Exception as error:
+            general_errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos de "
+                f"{self._reference_date.isoformat()}: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return
+
+        if not documents:
+            general_errors.append(
+                f"Índice '{index_name}' não retornou documentos com "
+                f"{timestamp_field} em {self._reference_date.isoformat()}."
+            )
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por {timestamp_field} em "
+            f"{self._reference_date.isoformat()} retornou {len(documents)} documento(s)."
+        )
+        self._run_validation_stage(
+            "Mapping",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                group_errors_by_document=True,
+            ),
+        )
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_documents_for_date(
+                index_name,
+                documents,
+                timestamp_field,
+                self._reference_date,
+                stage_errors,
+                stage_details,
+            )
+        )
+
+    def _validate_documents_by_reference_month(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+        validate_positive_scores: bool = False,
+    ) -> None:
+        """Valida todos os documentos do mês atual, sem resolver alias."""
+        year_month = self._reference_date.strftime("%Y-%m")
+        general_errors = _CategorizedMessages(errors, "Geral")
+        try:
+            documents = self._repository.get_documents_by_month_match(
+                index_name,
+                self._reference_date,
+                timestamp_field,
+            )
+        except Exception as error:
+            general_errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos de "
+                f"{year_month}: {error.__class__.__name__}: {error}"
+            )
+            return
+
+        if not documents:
+            general_errors.append(
+                f"Índice '{index_name}' não retornou documentos com "
+                f"{timestamp_field} no mês {year_month}."
+            )
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' | consulta por {timestamp_field} em "
+            f"{year_month} retornou {len(documents)} documento(s)."
+        )
+        self._run_validation_stage(
+            "Mapping",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                group_errors_by_document=True,
+            ),
+        )
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_documents_for_month(
+                index_name,
+                documents,
+                timestamp_field,
+                year_month,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        if validate_positive_scores:
+            self._run_validation_stage(
+                "Score",
+                errors,
+                details,
+                lambda stage_errors, stage_details: self._validate_positive_scores(
+                    index_name,
+                    documents,
+                    stage_errors,
+                    stage_details,
+                ),
+            )
+
+    def _validate_positive_scores(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que os scores do hit e do _source sejam numéricos e positivos."""
+        invalid_hit_scores: list[str] = []
+        invalid_source_scores: list[str] = []
+
+        for document in documents:
+            document_id = str(document.get("_id", "não informado"))
+            hit_score = document.get("_score")
+            source_score = self._source(document).get("score")
+
+            if not self._is_positive_score(hit_score):
+                invalid_hit_scores.append(f"_id={document_id}, _score={hit_score!r}")
+            if not self._is_positive_score(source_score):
+                invalid_source_scores.append(
+                    f"_id={document_id}, _source.score={source_score!r}"
+                )
+
+        if invalid_hit_scores:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_hit_scores)} de "
+                f"{len(documents)} documento(s) possuem _score ausente, zero, "
+                f"negativo ou inválido: {', '.join(invalid_hit_scores)}."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' | _score positivo validado em "
+                f"{len(documents)} documento(s)."
+            )
+
+        if invalid_source_scores:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_source_scores)} de "
+                f"{len(documents)} documento(s) possuem _source.score ausente, "
+                f"zero, negativo ou inválido: {', '.join(invalid_source_scores)}."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' | _source.score positivo validado em "
+                f"{len(documents)} documento(s)."
+            )
+
+    def _validate_compliance_variation(
+        self,
+        index_name: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        variation_rules: tuple[tuple[str, str], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara os totais de compliance de hoje e ontem pelo `end_scan`."""
+        previous_date = self._reference_date - timedelta(days=1)
+        query_errors = _CategorizedMessages(errors, "Geral")
+        current_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            self._reference_date,
+            query_errors,
+            timestamp_field="end_scan",
+        )
+        previous_documents = self._get_documents_by_timestamp_match(
+            index_name,
+            previous_date,
+            query_errors,
+            timestamp_field="end_scan",
+        )
+        if current_documents is None or previous_documents is None:
+            return
+        
+        details.append(
+            f"[Geral] Consultas do indice {index_name} concluída com sucesso."
+        )
+        
+        document_validator = None
+        if index_name.endswith("_asset-compliance"):
+            document_validator = self._asset_compliance_document_validator.validate
+        elif index_name.endswith("_asset-policy-compliance"):
+            document_validator = self._asset_policy_compliance_document_validator.validate
+
+        details.append(
+            f"[Geral] Consultas dos documentos do indice {index_name} concluída com sucesso."
+        )
+
+        documents = [*current_documents, *previous_documents]
+
+        self._run_validation_stage(
+            "Mapping",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_mappings_for_documents(
+                documents,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+                document_validator=document_validator,
+                group_errors_by_document=True,
+            ),
+        )
+        self._run_validation_stage(
+            "Timestamp",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_document_indexes_creation_date(
+                documents,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        self._run_validation_stage(
+            "Timestamp",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_compliance_end_scan_dates(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_document_count(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        if not current_documents or not previous_documents:
+            missing_date = self._reference_date if not current_documents else previous_date
+            errors.append(
+                f"[Geral] Índice '{index_name}' não retornou documentos "
+                f"com end_scan em {missing_date.isoformat()} para calcular a variação diária."
+            )
+            return
+
+        fields = tuple(field for field, _ in variation_rules)
+        totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: totals.update(
+                self._capture_compliance_totals(
+                    index_name,
+                    current_documents,
+                    previous_documents,
+                    fields,
+                    stage_errors,
+                    stage_details,
+                )
+            ),
+        )
+        if not totals:
+            return
+        current_totals, previous_totals, invalid_fields = totals["totals"]
+        valid_rules = tuple(
+            (field, direction)
+            for field, direction in variation_rules
+            if field not in invalid_fields
+        )
+        if not valid_rules:
+            return
+        self._run_validation_stage(
+            "Comparação percentual",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_directional_fifty_percent_variation(
+                index_name,
+                tuple(
+                    (field, current_totals[field], previous_totals[field], direction)
+                    for field, direction in valid_rules
+                ),
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+    def _run_validation_stage(
+        self,
+        category: str,
+        errors: list[str],
+        details: list[str],
+        validation: Callable[[_CategorizedMessages, _CategorizedMessages], None],
+    ) -> None:
+        """Executa uma subvalidação e registra seu sucesso no report."""
+        validation(
+            _CategorizedMessages(errors, category),
+            _CategorizedMessages(details, category),
+        )
+        
+
+    def _validate_compliance_end_scan_dates(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        self._validate_documents_for_date(
+            index_name, current_documents, "end_scan", self._reference_date, errors, details
+        )
+        self._validate_documents_for_date(
+            index_name, previous_documents, "end_scan", previous_date, errors, details
+        )
+
+    def _validate_document_count(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        previous_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        if not current_documents or not previous_documents:
+            errors.append(
+                f"Índice '{index_name}' | quantidade de documentos não pode ser "
+                f"considerada equivalente: {self._reference_date.isoformat()}="
+                f"{len(current_documents)}; {previous_date.isoformat()}="
+                f"{len(previous_documents)}."
+            )
+            return
+        if len(current_documents) != len(previous_documents):
+            errors.append(
+                f"Índice '{index_name}' | quantidade de documentos divergente: "
+                f"{self._reference_date.isoformat()}={len(current_documents)}; "
+                f"{previous_date.isoformat()}={len(previous_documents)}."
+            )
+            return
+        details.append(
+            f"Índice '{index_name}' | quantidade de documentos equivalente: "
+            f"{len(current_documents)} em cada data."
+        )
+
+    def _capture_compliance_totals(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        fields: tuple[str, ...],
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, tuple[dict[str, float], dict[str, float], set[str]]]:
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name, current_documents, fields, errors
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name, previous_documents, fields, errors
+        )
+        invalid_fields = current_invalid_fields | previous_invalid_fields
+        # details.append(
+        #     f"Índice '{index_name}' | somas captadas em {len(current_documents)} documento(s) "
+        #     f"de hoje e {len(previous_documents)} de ontem, usando end_scan."
+        # )
+        return {"totals": (current_totals, previous_totals, invalid_fields)}
+
+    def _get_documents_by_timestamp_match(
+        self,
+        index_name: str,
+        reference_date: date,
+        errors: list[str],
+        timestamp_field: str,
+    ) -> list[dict[str, Any]] | None:
+        """Consulta uma data por vez com `match` e data serializada como texto."""
+        try:
+            return self._repository.get_documents_by_date_match(
+                index_name,
+                reference_date,
+                timestamp_field,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos com "
+                f"{timestamp_field} em '{reference_date.isoformat()}': "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return None
+
+    def _validate_current_asset_documents(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        timestamp_field: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que todos os documentos do índice diário pertençam a hoje."""
+        self._validate_documents_for_date(
+            index_name,
+            documents,
+            timestamp_field,
+            self._reference_date,
+            errors,
+            details,
+        )
+
+    def _validate_documents_for_date(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        timestamp_field: str,
+        expected_date: date,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que todos os documentos retornados pertencem à data consultada."""
+        invalid_timestamps: list[str] = []
+        for document in documents:
+            timestamp = self._source(document).get(timestamp_field)
+            document_date = self._parse_date(timestamp)
+            if document_date != expected_date:
+                document_id = str(document.get("_id", "não informado"))
+                invalid_timestamps.append(
+                    f"_id={document_id}, {timestamp_field}={timestamp or 'não informado'}"
+                )
+
+        if invalid_timestamps:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_timestamps)} de "
+                f"{len(documents)} documento(s) possuem {timestamp_field} diferente de "
+                f"{expected_date.isoformat()}: {', '.join(invalid_timestamps)}."
+            )
+            return
+
+        details.append(
+            f"[Timestamp] Índice '{index_name}' | busca por {timestamp_field} em "
+            f"{expected_date.isoformat()} retornou {len(documents)} documento(s), "
+            "todos validados."
+        )
+
+    def _validate_documents_for_month(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        timestamp_field: str,
+        expected_year_month: str,
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Garante que cada documento retornado pertence ao mês consultado."""
+        invalid_timestamps: list[str] = []
+        for document in documents:
+            timestamp = self._source(document).get(timestamp_field)
+            if not isinstance(timestamp, str) or not timestamp.startswith(expected_year_month):
+                document_id = str(document.get("_id", "não informado"))
+                invalid_timestamps.append(
+                    f"_id={document_id}, {timestamp_field}={timestamp or 'não informado'}"
+                )
+
+        if invalid_timestamps:
+            errors.append(
+                f"Índice '{index_name}' | {len(invalid_timestamps)} de "
+                f"{len(documents)} documento(s) possuem {timestamp_field} fora de "
+                f"{expected_year_month}: {', '.join(invalid_timestamps)}."
+            )
+            return
+
+        details.append(
+            f"Índice '{index_name}' | busca por {timestamp_field} em "
+            f"{expected_year_month} retornou {len(documents)} documento(s), "
+            "todos validados."
+        )
+
+    def _validate_document_indexes_creation_date(
+        self,
+        documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Valida a criação de cada índice físico que retornou documentos."""
+        for document_index in sorted(
+            {
+                document["_index"]
+                for document in documents
+                if isinstance(document.get("_index"), str) and document["_index"]
+            }
+        ):
+            self._validate_index_name_creation_date(document_index, errors, details)
+
+    def _validate_mappings_for_documents(
+        self,
+        documents: list[dict[str, Any]],
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+        document_validator: Callable[[dict[str, Any]], list[str]] | None = None,
+        group_errors_by_document: bool = False,
+    ) -> None:
+        """Valida o contrato do índice pelo retorno de `GET /<índice>/_mapping`."""
+        del document_validator, group_errors_by_document
+
+        indexes_from_documents = {
+            document_index
+            for document in documents
+            if isinstance(
+                document_index := document.get("_index"), str
+            ) and document_index
+        }
+        if not indexes_from_documents:
+            errors.append("A busca não retornou nome de índice (_index) em nenhum documento.")
+            return
+
+        for document_index in sorted(indexes_from_documents):
+            self._validate_mapping(
+                document_index,
+                expected_mapping,
+                errors,
+                details,
+                include_success_detail=True,
+            )
+
+    @staticmethod
+    def _summarize_document_mapping_errors(errors: list[str]) -> list[str]:
+        """Agrupa erros iguais que diferem apenas pela posição de arrays do documento."""
+        grouped_errors: dict[str, tuple[str, int]] = {}
+        for error in errors:
+            normalized_error = re.sub(r"\[\d+\]", "[*]", error)
+            first_error, occurrences = grouped_errors.get(normalized_error, (error, 0))
+            grouped_errors[normalized_error] = (first_error, occurrences + 1)
+
+        summarized_errors: list[str] = []
+        for first_error, occurrences in grouped_errors.values():
+            if occurrences == 1:
+                summarized_errors.append(first_error)
+                continue
+            scope = (
+                "posição(ões) de checks.items"
+                if "checks.items[" in first_error
+                else "ocorrência(s) no documento"
+            )
+            summarized_errors.append(
+                f"{first_error} (ocorre em {occurrences} {scope})"
+            )
+        return summarized_errors
+
+    def _validate_mapping(
+        self,
+        index_name: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+        include_success_detail: bool = True,
+    ) -> bool:
+        """Compara o mapping efetivo do índice com o contrato do respectivo produto."""
+        try:
+            mapping = self._repository.get_index_mapping(index_name)
+        except Exception as error:
+            errors.append(
+                f"[Mapping] Índice '{index_name}' | erro ao consultar "
+                f"GET /{index_name}/_mapping: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return False
+
+        actual_properties = mapping.get("properties")
+        if not isinstance(actual_properties, dict):
+            errors.append(f"Índice '{index_name}' | mapping sem propriedades configuradas.")
+            return False
+
+        mapping_errors = OpenSearchMappingValidator().validate(
+            actual_properties,
+            expected_mapping,
+        )
+        if mapping_errors:
+            errors.extend(
+                f"[Mapping] Índice '{index_name}' | mapping inválido: {mapping_error}"
+                for mapping_error in mapping_errors
+            )
+            return False
+        if include_success_detail:
+            details.append(f"[Mapping] Índice '{index_name}' | mapping validado com sucesso.")
+        return True
+
+    def _validate_dated_index_document(
+        self,
+        index_name: str,
+        expected_date: date,
+        timestamp_field: str,
+        errors: list[str],
+        details: list[str],
+        continue_when_outdated: bool = False,
+    ) -> dict[str, Any] | None:
+        try:
+            index = next(
+                (item for item in self._repository.get_indices(index_name) if item.name == index_name),
+                None,
+            )
+            if index is None:
+                errors.append(f"Índice '{index_name}' não encontrado.")
+                return None
+            if index.document_count <= 0:
+                errors.append(f"Índice '{index_name}' não possui documentos.")
+                return None
+            document = self._repository.get_latest_document(index_name, timestamp_field)
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documento mais recente: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return None
+
+        if document is None:
+            errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
+            return None
+
+        self._save_document_source(index_name, self._source(document))
+        timestamp = self._source(document).get(timestamp_field)
+        document_date = self._parse_date(timestamp)
+        if document_date != expected_date:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
+                f"{timestamp or 'não informado'}; última data encontrada: "
+                f"{document_date.isoformat() if document_date else 'não informada'}; "
+                f"esperado {expected_date.isoformat()}."
+            )
+            if not continue_when_outdated:
+                return None
+        details.append(
+            f"Índice '{index_name}' validado: {index.document_count} documento(s); "
+            f"{timestamp_field} mais recente: {timestamp}."
+        )
+        return document
+
+    @staticmethod
+    def _save_document_source(index_name: str, source: dict[str, Any]) -> None:
+        """Salva o `_source` retornado para inspeção local durante a execução."""
+        output_directory = Path("reports/debug-documents")
+        safe_index_name = re.sub(r"[^A-Za-z0-9._-]+", "_", index_name)
+        output_path = output_directory / f"{safe_index_name}.json"
+        try:
+            output_directory.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(source, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except OSError:
+            # O dump é somente diagnóstico e não deve alterar o resultado do teste.
+            return
+
+    def _get_applicable_client(
+        self,
+        target: ClientTarget,
+        expected_field: str,
+        expected_value: object = True,
+    ) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+        try:
+            client = self._cognito_repository.get_client("public", target.client_id)
+        except Exception as error:
+            return None, [
+                f"Cliente '{target.client_id}' | erro ao consultar o Cognito: "
+                f"{error.__class__.__name__}: {error}"
+            ], []
+
+        if client is None:
+            return None, [], [
+                f"Cliente '{target.client_id}' não encontrado no Cognito; "
+                "índices não aplicáveis."
+            ]
+        actual_value = client.get(expected_field)
+        if actual_value != expected_value:
+            return None, [], [
+                f"Cliente '{target.client_id}' | {expected_field}={actual_value!r}; "
+                f"esperado {expected_value!r}; índices não aplicáveis."
+            ]
+        return client, [], [
+            f"Cliente '{target.client_id}' | Cognito validado: "
+            f"{expected_field}={expected_value!r}."
+        ]
+
+    def _validate_index(
+        self,
+        index_or_name: VulnerabilityIndex | str,
+        timestamp_field: str,
+        errors: list[str],
+        details: list[str],
+        compare_previous_day: bool = True,
+        continue_when_outdated: bool = False,
+    ) -> _IndexDocuments | None:
+        """Orquestra a validação genérica de atualização de um índice."""
+        index_name = (
+            index_or_name.name
+            if isinstance(index_or_name, VulnerabilityIndex)
+            else index_or_name
+        )
+        index = self._get_available_index(index_or_name, errors)
+        if index is None:
+            return None
+
+        document = self._get_latest_document(index.name, timestamp_field, errors)
+        if document is None:
+            return None
+
+        timestamp_and_date = self._validate_latest_document_date(
+            index.name,
+            document,
+            timestamp_field,
+            errors,
+            continue_when_outdated,
+        )
+        if timestamp_and_date is None:
+            return None
+        timestamp, document_date = timestamp_and_date
+
+        if not compare_previous_day:
+            details.append(
+                f"Índice '{index_name}' possui {index.document_count} documento(s); "
+                f"lastupdated mais recente é de hoje: {timestamp}."
+            )
+            return _IndexDocuments(latest=document, previous=None)
+
+        previous_day_documents = self._get_previous_day_documents(
+            index_name,
+            timestamp,
+            timestamp_field,
+            document_date,
+            errors,
+        )
+        if previous_day_documents is None:
+            return None
+
+        previous_day = document_date - timedelta(days=1)
+        details.append(
+            f"Índice '{index_name}' | {timestamp_field} mais recente: {timestamp}; "
+            f"documentos em {previous_day.isoformat()}: {len(previous_day_documents)}."
+        )
+        if not previous_day_documents:
+            errors.append(
+                f"Índice '{index_name}' não possui documentos no dia anterior "
+                f"ao mais recente ({previous_day.isoformat()})."
+            )
+            previous_document = None
+        else:
+            previous_document = previous_day_documents[0]
+        if document_date == self._reference_date:
+            details.append(
+                f"Índice '{index_name}' possui {index.document_count} documento(s); "
+                "documento mais recente é de hoje."
+            )
+        else:
+            details.append(
+                f"Índice '{index_name}' possui {index.document_count} documento(s); "
+                f"documento mais recente de {document_date.isoformat()} será usado nas "
+                "demais validações."
+            )
+        return _IndexDocuments(latest=document, previous=previous_document)
+
+    def _get_available_index(
+        self,
+        index_or_name: VulnerabilityIndex | str,
+        errors: list[str],
+    ) -> VulnerabilityIndex | None:
+        """Obtém o índice já candidato ou o localiza pelo nome."""
+        if isinstance(index_or_name, VulnerabilityIndex):
+            index = index_or_name
+        else:
+            try:
+                index = next(
+                    (
+                        item
+                        for item in self._repository.get_indices(index_or_name)
+                        if item.name == index_or_name
+                    ),
+                    None,
+                )
+            except Exception as error:
+                errors.append(
+                    f"Índice '{index_or_name}' | erro ao consultar índice: "
+                    f"{error.__class__.__name__}: {error}"
+                )
+                return None
+
+        if index is None:
+            errors.append(f"Índice '{index_or_name}' não encontrado.")
+            return None
+        if index.document_count <= 0:
+            errors.append(f"Índice '{index.name}' não possui documentos.")
+            return None
+        return index
+
+    def _get_latest_document(
+        self,
+        index_name: str,
+        timestamp_field: str,
+        errors: list[str],
+    ) -> dict[str, Any] | None:
+        """Consulta o documento mais recente uma única vez."""
+        try:
+            document = self._repository.get_latest_document(index_name, timestamp_field)
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documento mais recente: "
+                f"{error.__class__.__name__}: {error}"
+            )
+            return None
+        if document is None:
+            errors.append(f"Índice '{index_name}' não retornou documento mais recente.")
+        return document
+
+    def _validate_latest_document_date(
+        self,
+        index_name: str,
+        document: dict[str, Any],
+        timestamp_field: str,
+        errors: list[str],
+        continue_when_outdated: bool = False,
+    ) -> tuple[str, date] | None:
+        """Garante que o campo temporal do documento mais recente seja de hoje."""
+        timestamp = self._source(document).get(timestamp_field)
+        document_date = self._parse_date(timestamp)
+        if document_date is None:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente sem {timestamp_field} válido."
+            )
+            return None
+        if document_date != self._reference_date:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente com {timestamp_field} "
+                f"{timestamp}; último dia encontrado: {document_date.isoformat()}; "
+                f"esperado {self._reference_date.isoformat()}."
+            )
+            if not continue_when_outdated:
+                return None
+        return timestamp, document_date
+
+    def _get_document_date(
+        self,
+        index_name: str,
+        document: dict[str, Any],
+        field_name: str,
+        errors: list[str],
+    ) -> date | None:
+        """Extrai uma data de documento sem exigir que ela seja a data de hoje."""
+        document_date = self._parse_date(self._source(document).get(field_name))
+        if document_date is None:
+            errors.append(
+                f"Índice '{index_name}' | documento mais recente sem {field_name} válido."
+            )
+        return document_date
+
+    def _get_previous_day_documents(
+        self,
+        index_name: str,
+        timestamp: str,
+        timestamp_field: str,
+        document_date: date,
+        errors: list[str],
+    ) -> list[dict[str, Any]] | None:
+        """Consulta os documentos do dia anterior quando a regra exigir histórico."""
+        try:
+            return self._repository.get_previous_day_documents(
+                index_name,
+                timestamp,
+                timestamp_field,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos do dia anterior "
+                f"a {document_date.isoformat()}: {error.__class__.__name__}: {error}"
+            )
+            return None
+
+    def _validate_assets_variation(
+        self,
+        index_name: str,
+        expected_mapping: dict[str, str | dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara a soma diária dos indicadores dos históricos de ativos."""
+        if index_name.endswith("_asset-historical-software"):
+            fields = (
+                "assets_total",
+                "assets_missing_mandatory_softwares",
+                "assets_with_unauthorized_softwares",
+            )
+        elif index_name.endswith("_asset-historical-observability"):
+            fields = ("assets.monitored_vulns", "assets.monitored_events")
+        else:
+            return
+
+        previous_date = self._reference_date - timedelta(days=1)
+        general_errors = _CategorizedMessages(errors, "Geral")
+        current_documents = self._get_documents_for_date(
+            index_name,
+            self._reference_date,
+            general_errors,
+        )
+        previous_documents = self._get_documents_for_date(
+            index_name,
+            previous_date,
+            general_errors,
+        )
+        if current_documents is None or previous_documents is None:
+            return
+
+        details.append(
+            f"[Geral] Índice '{index_name}' encontrado com sucesso"
+        )
+        self._run_validation_stage(
+            "Mapping",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_mapping(
+                index_name,
+                expected_mapping,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_document_count(
+                index_name,
+                current_documents,
+                previous_documents,
+                previous_date,
+                stage_errors,
+                stage_details,
+            ),
+        )
+        if not current_documents or not previous_documents:
+            missing_date = (
+                self._reference_date if not current_documents else previous_date
+            )
+            errors.append(
+                f"[Geral] Índice '{index_name}' não retornou documentos em "
+                f"{missing_date.isoformat()} para calcular a variação diária."
+            )
+            return
+
+        totals: dict[str, tuple[dict[str, float], dict[str, float], set[str]]] = {}
+        self._run_validation_stage(
+            "Geral",
+            errors,
+            details,
+            lambda stage_errors, stage_details: totals.update(
+                self._capture_asset_history_totals(
+                    index_name,
+                    current_documents,
+                    previous_documents,
+                    fields,
+                    stage_errors,
+                    stage_details,
+                )
+            ),
+        )
+        if not totals:
+            return
+        current_totals, previous_totals, invalid_fields = totals["totals"]
+        valid_fields = tuple(field for field in fields if field not in invalid_fields)
+        if not valid_fields:
+            return
+
+        self._run_validation_stage(
+            "Comparação percentual",
+            errors,
+            details,
+            lambda stage_errors, stage_details: self._validate_fifty_percent_variation(
+                index_name,
+                tuple(
+                    (field, current_totals[field], previous_totals[field])
+                    for field in valid_fields
+                ),
+                stage_errors,
+                stage_details,
+            ),
+        )
+
+    def _capture_asset_history_totals(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        fields: tuple[str, ...],
+        errors: list[str],
+        details: list[str],
+    ) -> dict[str, tuple[dict[str, float], dict[str, float], set[str]]]:
+        current_totals, current_invalid_fields = self._sum_document_fields(
+            index_name, current_documents, fields, errors
+        )
+        previous_totals, previous_invalid_fields = self._sum_document_fields(
+            index_name, previous_documents, fields, errors
+        )
+        details.append(
+            f"Índice '{index_name}' | somas captadas em {len(current_documents)} documento(s) "
+            f"de hoje e {len(previous_documents)} de ontem."
+        )
+        return {
+            "totals": (
+                current_totals,
+                previous_totals,
+                current_invalid_fields | previous_invalid_fields,
+            )
+        }
+
+    def _get_documents_for_date(
+        self,
+        index_name: str,
+        reference_date: date,
+        errors: list[str],
+        timestamp_field: str = "date",
+    ) -> list[dict[str, Any]] | None:
+        start = datetime.combine(reference_date, datetime.min.time())
+        try:
+            return self._repository.get_documents_between(
+                index_name,
+                start,
+                start + timedelta(days=1),
+                timestamp_field=timestamp_field,
+            )
+        except Exception as error:
+            errors.append(
+                f"Índice '{index_name}' | erro ao consultar documentos de "
+                f"{reference_date.isoformat()}: {error.__class__.__name__}: {error}"
+            )
+            return None
+
+    def _validate_directional_fifty_percent_variation(
+        self,
+        index_name: str,
+        fields: tuple[tuple[str, object, object, str], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Aplica limite de 50% no sentido de risco definido para cada campo."""
+        for field_name, current_value, previous_value, direction in fields:
+            current = float(current_value)
+            previous = float(previous_value)
+            if previous < 0 or current < 0:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} não pode possuir "
+                    f"valor negativo (ontem={previous_value}, hoje={current_value})."
+                )
+                continue
+
+            if previous == 0:
+                if direction == "increase" and current > 0:
+                    errors.append(
+                        f"Índice '{index_name}' | total de {field_name} aumentou de 0 "
+                        f"para {current_value}; excede o limite de 50%."
+                    )
+                continue
+
+            variation = (current - previous) / previous
+            exceeds_limit = (
+                direction == "increase" and variation > 0.5
+            ) or (
+                direction == "decrease" and variation <= -0.5
+            )
+            if exceeds_limit:
+                action = "aumentou" if direction == "increase" else "reduziu"
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} {action} "
+                    f"{abs(variation):.0%} (ontem={previous_value}, hoje={current_value}); "
+                    "limite permitido: 50%."
+                )
+                continue
+            details.append(
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
+            )
+
+    def _sum_document_fields(
+        self,
+        index_name: str,
+        documents: list[dict[str, Any]],
+        fields: tuple[str, ...],
+        errors: list[str],
+    ) -> tuple[dict[str, float], set[str]]:
+        totals = {field: 0.0 for field in fields}
+        invalid_fields: set[str] = set()
+        for position, document in enumerate(documents, start=1):
+            source = self._source(document)
+            document_id = str(document.get("_id", "não informado"))
+            for field in fields:
+                value = self._get_nested_value(source, field)
+                if not self._is_number(value):
+                    errors.append(
+                        f"Índice '{index_name}' | documento {position} (_id={document_id}) | "
+                        f"{field} deve ser numérico para compor a soma diária."
+                    )
+                    invalid_fields.add(field)
+                    continue
+                totals[field] += float(value)
+        return totals, invalid_fields
+
+    @staticmethod
+    def _get_nested_value(source: dict[str, Any], field_path: str) -> object:
+        value: object = source
+        for field_name in field_path.split("."):
+            if not isinstance(value, dict):
+                return None
+            value = value.get(field_name)
+        return value
+
+    def _validate_fifty_percent_variation(
+        self,
+        index_name: str,
+        fields: tuple[tuple[str, object, object], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Falha quando um total diário cresce mais de 50% em relação ao dia anterior."""
+        for field_name, current_value, previous_value in fields:
+            if not self._is_number(current_value) or not self._is_number(previous_value):
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} deve ser numérico "
+                    "nos dias comparados."
+                )
+                continue
+
+            current = float(current_value)
+            previous = float(previous_value)
+            if previous < 0 or current < 0:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} não pode possuir valor "
+                    f"negativo (ontem={previous_value}, hoje={current_value})."
+                )
+                continue
+            if previous == 0:
+                if current > 0:
+                    errors.append(
+                        f"Índice '{index_name}' | total de {field_name} aumentou de 0 para "
+                        f"{current_value}; excede o limite de 50%."
+                    )
+                else:
+                    details.append(
+                        f"Índice '{index_name}' | total de {field_name}: sem variação (0 para 0)."
+                    )
+                continue
+
+            variation = (current - previous) / previous
+            if variation > 0.5:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} aumentou {variation:.0%} "
+                    f"(ontem={previous_value}, hoje={current_value}); "
+                    "máximo permitido: 50%."
+                )
+                continue
+            details.append(
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
+            )
+
+    def _validate_absolute_fifty_percent_variation(
+        self,
+        index_name: str,
+        fields: tuple[tuple[str, object, object], ...],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Falha quando a variação absoluta dos totais de score ultrapassa 50%."""
+        for field_name, current_value, previous_value in fields:
+            current = float(current_value)
+            previous = float(previous_value)
+            if not math.isfinite(current) or not math.isfinite(previous):
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} deve ser finito "
+                    f"(ontem={previous_value}, hoje={current_value})."
+                )
+                continue
+
+            if previous == 0:
+                if current == 0:
+                    details.append(
+                        f"Índice '{index_name}' | total de {field_name}: "
+                        "ontem=0, hoje=0; sem variação."
+                    )
+                else:
+                    errors.append(
+                        f"Índice '{index_name}' | total de {field_name} variou de 0 "
+                        f"para {current_value}; não há base para uma variação de até 50%."
+                    )
+                continue
+
+            variation = abs(current - previous) / abs(previous)
+            if variation > 0.5:
+                errors.append(
+                    f"Índice '{index_name}' | total de {field_name} variou {variation:.0%} "
+                    f"(ontem={previous_value}, hoje={current_value}); "
+                    "máximo permitido: 50%."
+                )
+                continue
+            details.append(
+                f"Índice '{index_name}' | total de {field_name}: ontem={previous_value}, "
+                f"hoje={current_value}, variação={variation:.0%}."
+            )
+
+    @staticmethod
+    def _source(document: dict[str, Any]) -> dict[str, Any]:
+        return document.get("_source", document)
+
+    @staticmethod
+    def _is_number(value: object) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    @classmethod
+    def _is_valid_score(cls, value: object) -> bool:
+        return cls._is_number(value) and value not in {0, -1}
+
+    @classmethod
+    def _is_positive_score(cls, value: object) -> bool:
+        return (
+            cls._is_number(value)
+            and math.isfinite(float(value))
+            and float(value) > 0
+        )
+
+    @staticmethod
+    def _parse_date(value: object) -> date | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None

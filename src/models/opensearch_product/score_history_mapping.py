@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+EXPECTED_SCORE_HISTORY_MAPPING: dict[str, str | dict[str, Any]] = {
+    "assessment_data": {
+        "assessment_technology": "text",
+        "critical_controls_qty": "long",
+        "critical_findings_qty": "long",
+        "high_controls_qty": "long",
+        "high_findings_qty": "long",
+        "last_update": "text",
+        "low_controls_qty": "long",
+        "low_findings_qty": "long",
+        "medium_controls_qty": "long",
+        "medium_findings_qty": "long",
+    },
+    "assessment_final_score": "float",
+    "assessment_subscores": {
+        "aws___alares": "float",
+        "aws___homologation": "float",
+        "aws___network": "float",
+        "aws___production": "float",
+        "gcp___alares_digital": "float",
+        "gcp___dataananalytics": "float",
+        "gcp___datamktanalytics": "float",
+        "gitlab": "float",
+    },
+    "axur": "float",
+    "cis": "float",
+    "cis_alta": "float",
+    "cis_baixa": "float",
+    "cis_media": "float",
+    "cis_ultima_atualizacao": "text",
+    "date": "date",
+    "global_score_average": "float",
+    "global_score_comparison": "float",
+    "month": "date",
+    "month_date": "boolean",
+    "rsa": "float",
+    "score": "float",
+    "sector": "text",
+    "sector_score_average": "float",
+    "sector_score_comparison": "float",
+    "siem": "float",
+    "siem_final_score": "float",
+    "siem_incident_score": "float",
+    "siem_observability_data": "object",
+    "siem_observability_score": "float",
+    "siem_waiting_client_score": "float",
+    "vulnerabilities": "float",
+}

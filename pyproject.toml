@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qa-integration-tests"
+version = "0.1.0"
+description = "Post-pipeline integration tests for PostgreSQL and OpenSearch."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest==9.1.1",
+    "allure-pytest==2.16.0",
+    "psycopg[binary]==3.3.4",
+    "python-dotenv==1.2.3",
+    "opensearch-py==3.2.0",
+    "boto3==1.40.29",
+    "requests==2.32.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
