@@ -41,8 +41,6 @@ from src.repositories.postgres_catalog_repository import PostgresCatalogReposito
 
 
 COGNITO_DATABASE = "cognito"
-ASSETS_DATABASE = "assets"
-CLIENTS_DATABASE = "clients"
 
 
 def _report_has_failures(report: str) -> bool:
@@ -230,9 +228,8 @@ def cognito_postgres_connection(
 
 @pytest.fixture(scope="session")
 def assets_postgres_connection(
-    postgres_connection_factory: PostgresConnectionFactory,
 ) -> Generator[PostgresConnection, None, None]:
-    connection = postgres_connection_factory.create_for_database(ASSETS_DATABASE)
+    connection = PostgresConnection(PostgresSettings.assets_from_env())
     connection.connect()
 
     yield connection
@@ -279,9 +276,8 @@ def assets_client_repository(
 
 @pytest.fixture(scope="session")
 def clients_postgres_connection(
-    postgres_connection_factory: PostgresConnectionFactory,
 ) -> Generator[PostgresConnection, None, None]:
-    connection = postgres_connection_factory.create_for_database(CLIENTS_DATABASE)
+    connection = PostgresConnection(PostgresSettings.clients_from_env())
     connection.connect()
     yield connection
     connection.close()

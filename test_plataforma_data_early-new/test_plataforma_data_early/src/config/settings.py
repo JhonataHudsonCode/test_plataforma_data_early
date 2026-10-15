@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -60,6 +60,51 @@ class PostgresSettings:
             connect_timeout=int(_env("PG_CONNECT_TIMEOUT")),
             target_schema=_env("PG_TARGET_SCHEMA"),
             target_table=_env("PG_TARGET_TABLE"),
+        )
+
+    @classmethod
+    def clients_from_env(cls) -> "PostgresSettings":
+        """Retorna a conexão da base clients.
+
+        Em produção, a base clients usa credenciais próprias. Nos demais
+        ambientes, mantém a conexão atual do Cognito e troca somente o database,
+        preservando o comportamento já utilizado em HML.
+        """
+        return cls._from_dedicated_database_env("clients", "CLIENTS")
+
+    @classmethod
+    def assets_from_env(cls) -> "PostgresSettings":
+        """Retorna a conexão da base assets.
+
+        Em produção, a base assets usa credenciais próprias. Nos demais
+        ambientes, mantém a conexão atual do Cognito e troca somente o database.
+        """
+        return cls._from_dedicated_database_env("assets", "ASSETS")
+
+    @classmethod
+    def _from_dedicated_database_env(
+        cls,
+        database_name: str,
+        environment_prefix: str,
+    ) -> "PostgresSettings":
+        cognito_settings = cls.from_env()
+        if TEST_ENV.strip().lower() != "prod":
+            return replace(cognito_settings, database=database_name)
+
+        return cls(
+            host=_env(f"{environment_prefix}_PG_HOST"),
+            port=int(_env(f"{environment_prefix}_PG_PORT")),
+            database=_env(f"{environment_prefix}_PG_DATABASE"),
+            user=_env(f"{environment_prefix}_PG_USER"),
+            password=_env(f"{environment_prefix}_PG_PASSWORD"),
+            connect_timeout=int(
+                os.getenv(
+                    f"{environment_prefix}_PG_CONNECT_TIMEOUT",
+                    str(cognito_settings.connect_timeout),
+                )
+            ),
+            target_schema=cognito_settings.target_schema,
+            target_table=cognito_settings.target_table,
         )
 
 
