@@ -32,7 +32,7 @@ class RsaIndexValidator:
         self._opensearch_repository = opensearch_repository
         self._reference_date = reference_date
 
-    def     validate(self, target: ClientTarget) -> ClientValidationResult:
+    def validate(self, target: ClientTarget) -> ClientValidationResult:
         client = self._cognito_repository.get_table(
             schema_name=CLIENT_SCHEMA,
             client_id=target.client_id,
