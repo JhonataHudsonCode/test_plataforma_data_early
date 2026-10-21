@@ -9,66 +9,52 @@ from typing import TypeVar
 Target = TypeVar("Target")
 Result = TypeVar("Result")
 
-_DEFAULT_MAX_REQUESTS_PER_OPENSEARCH = 5
+_DEFAULT_MAX_CONCURRENT_CLIENTS = 5
 
 
-def _max_requests_per_opensearch() -> int:
-    """Obtém o limite de validações simultâneas, nunca superior a cinco."""
+def _max_concurrent_client_validations() -> int:
+    """Obtém o limite global de clientes validados simultaneamente."""
     value = os.getenv(
-        "OPENSEARCH_MAX_CONCURRENT_REQUESTS",
-        str(_DEFAULT_MAX_REQUESTS_PER_OPENSEARCH),
+        "OPENSEARCH_MAX_CONCURRENT_CLIENTS",
+        # Mantém compatibilidade com a configuração introduzida anteriormente.
+        os.getenv(
+            "OPENSEARCH_MAX_CONCURRENT_REQUESTS",
+            str(_DEFAULT_MAX_CONCURRENT_CLIENTS),
+        ),
     )
     try:
         configured_limit = int(value)
     except ValueError as error:
         raise ValueError(
-            "OPENSEARCH_MAX_CONCURRENT_REQUESTS deve ser um número inteiro entre 1 e 5."
+            "OPENSEARCH_MAX_CONCURRENT_CLIENTS deve ser um número inteiro entre 1 e 5."
         ) from error
 
     if configured_limit < 1:
         raise ValueError(
-            "OPENSEARCH_MAX_CONCURRENT_REQUESTS deve ser um número inteiro entre 1 e 5."
+            "OPENSEARCH_MAX_CONCURRENT_CLIENTS deve ser um número inteiro entre 1 e 5."
         )
 
-    return min(configured_limit, _DEFAULT_MAX_REQUESTS_PER_OPENSEARCH)
+    return min(configured_limit, _DEFAULT_MAX_CONCURRENT_CLIENTS)
 
 
-def validate_targets_by_opensearch(
+def validate_client_targets(
     targets: Iterable[Target],
     validate: Callable[[Target], Result],
-    opensearch_key: Callable[[Target], str | None],
 ) -> list[Result]:
-    """Executa validações concorrentes sem exceder cinco por OpenSearch.
+    """Valida no máximo cinco clientes simultaneamente em um cenário.
 
-    A chave identifica o endpoint que receberá as chamadas. Cada validação faz
-    suas próprias requisições de forma sequencial; portanto, limitar as
-    validações simultâneas limita as requisições simultâneas por endpoint.
-    A ordem retornada acompanha a ordem dos alvos recebidos.
+    O limite é por cenário de teste, não por host. Portanto, com 246 clientes
+    e limite cinco, somente cinco clientes terão consultas em seus respectivos
+    endpoints Octopus em andamento por vez. A ordem retornada acompanha a dos
+    alvos recebidos.
     """
     items = list(targets)
     if not items:
         return []
 
-    limit = _max_requests_per_opensearch()
-    keys = {opensearch_key(target) or "__default__" for target in items}
-    max_workers = min(len(items), limit * len(keys))
-
-    # Um semáforo por endpoint permite cinco validações por OpenSearch, mesmo
-    # quando a lista contém clientes hospedados em endpoints diferentes.
-    from threading import BoundedSemaphore, Lock
-
-    semaphores: dict[str, BoundedSemaphore] = {}
-    semaphore_lock = Lock()
-
-    def run(target: Target) -> Result:
-        key = opensearch_key(target) or "__default__"
-        with semaphore_lock:
-            semaphore = semaphores.setdefault(key, BoundedSemaphore(limit))
-        with semaphore:
-            return validate(target)
-
+    max_workers = min(len(items), _max_concurrent_client_validations())
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(run, items))
+        return list(executor.map(validate, items))
 
 
 def validate_targets_on_product_opensearch(
@@ -76,4 +62,4 @@ def validate_targets_on_product_opensearch(
     validate: Callable[[Target], Result],
 ) -> list[Result]:
     """Executa no máximo cinco validações no OpenSearch de produto compartilhado."""
-    return validate_targets_by_opensearch(targets, validate, lambda _target: "product")
+    return validate_client_targets(targets, validate)

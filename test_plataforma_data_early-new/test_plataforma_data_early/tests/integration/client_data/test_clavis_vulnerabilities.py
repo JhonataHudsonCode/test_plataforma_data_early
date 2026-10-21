@@ -12,7 +12,7 @@ from src.repositories.opensearch_vulnerability_repository import (
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
 from src.services.client_validation_report import ClientValidationReport
 from src.services.opensearch_concurrency import (
-    validate_targets_by_opensearch,
+    validate_client_targets,
     validate_targets_on_product_opensearch,
 )
 from src.validators.client_data.database.activation_key_validator import ActivationKeyValidator
@@ -63,10 +63,9 @@ def test_should_validate_has_rsa_opensearch_client(
     test_name = inspect.currentframe().f_code.co_name
 
     validator = RsaIndexValidator(db_client_repository, client_repository, today)
-    for result in validate_targets_by_opensearch(
+    for result in validate_client_targets(
         client_targets,
         validator.validate,
-        lambda target: target.host,
     ):
         report.add_client_result(
             result.client_id,
@@ -87,10 +86,9 @@ def test_should_validate_has_alerts_opensearch_client(
     today = date.today()
     test_name = inspect.currentframe().f_code.co_name
     validator = AlertsIndexValidator(db_client_repository, client_repository, today)
-    for result in validate_targets_by_opensearch(
+    for result in validate_client_targets(
         client_targets,
         validator.validate,
-        lambda target: target.host,
     ):
         report.add_client_result(
             result.client_id,
@@ -115,10 +113,9 @@ def test_should_validate_rules_opensearch_client(
         client_repository,
         today,
     )
-    for result in validate_targets_by_opensearch(
+    for result in validate_client_targets(
         client_targets,
         validator.validate,
-        lambda target: target.host,
     ):
         report.add_client_result(
             result.client_id,
@@ -204,10 +201,9 @@ def test_should_validate_axur_opensearch_client(
     today = date.today()
     test_name = inspect.currentframe().f_code.co_name
     validator = AxurIndexValidator(db_client_repository, client_repository, today)
-    for result in validate_targets_by_opensearch(
+    for result in validate_client_targets(
         client_targets,
         validator.validate,
-        lambda target: target.host,
     ):
         report.add_client_result(result.client_id, result.failures, result.infos, result.details)
     _save_client_report(report, test_name)

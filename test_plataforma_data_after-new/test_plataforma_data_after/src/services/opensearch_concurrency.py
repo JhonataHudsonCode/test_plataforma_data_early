@@ -15,19 +15,22 @@ _DEFAULT_MAX_REQUESTS_PER_OPENSEARCH = 5
 def _max_requests_per_opensearch() -> int:
     """Obtém o limite de validações simultâneas, nunca superior a cinco."""
     value = os.getenv(
-        "OPENSEARCH_MAX_CONCURRENT_REQUESTS",
-        str(_DEFAULT_MAX_REQUESTS_PER_OPENSEARCH),
+        "OPENSEARCH_MAX_CONCURRENT_CLIENTS",
+        os.getenv(
+            "OPENSEARCH_MAX_CONCURRENT_REQUESTS",
+            str(_DEFAULT_MAX_REQUESTS_PER_OPENSEARCH),
+        ),
     )
     try:
         configured_limit = int(value)
     except ValueError as error:
         raise ValueError(
-            "OPENSEARCH_MAX_CONCURRENT_REQUESTS deve ser um número inteiro entre 1 e 5."
+            "OPENSEARCH_MAX_CONCURRENT_CLIENTS deve ser um número inteiro entre 1 e 5."
         ) from error
 
     if configured_limit < 1:
         raise ValueError(
-            "OPENSEARCH_MAX_CONCURRENT_REQUESTS deve ser um número inteiro entre 1 e 5."
+            "OPENSEARCH_MAX_CONCURRENT_CLIENTS deve ser um número inteiro entre 1 e 5."
         )
 
     return min(configured_limit, _DEFAULT_MAX_REQUESTS_PER_OPENSEARCH)

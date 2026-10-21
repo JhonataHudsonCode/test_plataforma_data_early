@@ -191,17 +191,23 @@ database `clients`.
 
 ## Concorrência de OpenSearch
 
-Os testes são executados sequencialmente pelo Pytest. Dentro de uma validação que
-percorre `client_targets`, os clientes são processados concorrentemente, com no
-máximo cinco validações por OpenSearch. Para os endpoints Octopus, o limite é
-independente por host; para `OPENSEARCH_HOST`, o limite é compartilhado por todos
-os clientes do teste.
+Os comandos do Makefile usam dois workers do Pytest (`pytest-xdist`). Dentro de
+cada validação que percorre `client_targets`, os clientes são processados
+concorrentemente. Nos
+testes que consultam o OpenSearch de cada cliente, o limite é global por cenário:
+com 246 clientes e valor `5`, somente cinco clientes consultam seus respectivos
+endpoints Octopus por vez. Para `OPENSEARCH_HOST`, o limite é compartilhado por
+todos os clientes do teste.
 
 ```env
-OPENSEARCH_MAX_CONCURRENT_REQUESTS=5
+OPENSEARCH_MAX_CONCURRENT_CLIENTS=5
+PYTEST_XDIST_WORKERS=2
 ```
 
 O valor permitido é de `1` a `5`; valores acima de cinco são limitados a cinco.
+`PYTEST_XDIST_WORKERS` controla quantos cenários Pytest rodam em paralelo; o
+valor padrão é `2`. Assim, com a configuração acima, no máximo dois cenários e
+cinco clientes por cenário são executados em paralelo.
 
 ## 6. Allure
 

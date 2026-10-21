@@ -78,6 +78,11 @@ def pytest_sessionstart(session):
     Executado quando a sessão de testes começa. Aqui, podemos realizar ações de configuração ou inicialização.
     """
 
+    # Workers do xdist não podem limpar diretórios compartilhados enquanto
+    # outro worker gera resultados.
+    if hasattr(session.config, "workerinput"):
+        return
+
     session._validation_started_at = perf_counter()
     if ALLURE_RESULTS_DIRECTORY.exists() and ALLURE_RESULTS_DIRECTORY.is_dir():
         shutil.rmtree(ALLURE_RESULTS_DIRECTORY)
@@ -143,6 +148,10 @@ def pytest_sessionfinish(session, exitstatus):
     """
     Executado quando toda a sessão de testes termina. Aqui, podemos realizar ações de limpeza ou relatórios finais.
     """
+
+    # Apenas o controlador consolida relatórios, envia e-mail e publica no S3.
+    if hasattr(session.config, "workerinput"):
+        return
 
     general_report_name = "relatorio_geral.txt"
     report_paths = sorted(
