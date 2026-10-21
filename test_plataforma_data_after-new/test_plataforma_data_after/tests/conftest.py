@@ -52,11 +52,6 @@ def _report_has_failures(report: str) -> bool:
     )
 
 
-def _is_xdist_worker(config: pytest.Config) -> bool:
-    """Indica se o processo atual é um worker do pytest-xdist."""
-    return hasattr(config, "workerinput")
-
-
 def _send_report_email(
     email_service: EmailService,
     subject: str,
@@ -82,11 +77,6 @@ def pytest_sessionstart(session):
     """
     Executado quando a sessão de testes começa. Aqui, podemos realizar ações de configuração ou inicialização.
     """
-
-    # Os workers usam os mesmos diretórios de relatório; somente o processo
-    # controlador pode limpá-los antes da execução.
-    if _is_xdist_worker(session.config):
-        return
 
     session._validation_started_at = perf_counter()
     if ALLURE_RESULTS_DIRECTORY.exists() and ALLURE_RESULTS_DIRECTORY.is_dir():
@@ -153,11 +143,6 @@ def pytest_sessionfinish(session, exitstatus):
     """
     Executado quando toda a sessão de testes termina. Aqui, podemos realizar ações de limpeza ou relatórios finais.
     """
-
-    # Só o controlador consolida os arquivos produzidos pelos workers e envia
-    # e-mail/S3 quando todos já finalizaram.
-    if _is_xdist_worker(session.config):
-        return
 
     general_report_name = "relatorio_geral.txt"
     report_paths = sorted(

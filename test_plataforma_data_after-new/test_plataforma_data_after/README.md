@@ -53,6 +53,18 @@ python -m pytest -m client_data
 
 Os mesmos comandos estão disponíveis via `make test`, `make test-postgres`, `make test-opensearch` e `make test-after-pipeline` em ambientes com GNU Make.
 
+## Concorrência de OpenSearch
+
+Os testes são executados sequencialmente pelo Pytest. Cada teste que percorre
+`client_targets` processa até cinco clientes simultaneamente no OpenSearch de
+produto (`OPENSEARCH_HOST`), sem executar outros testes em paralelo.
+
+```env
+OPENSEARCH_MAX_CONCURRENT_REQUESTS=5
+```
+
+O valor permitido é de `1` a `5`; valores acima de cinco são limitados a cinco.
+
 O resultado bruto do Allure fica em `reports/allure-results`. Para gerar a interface visual, instale o Allure CLI e execute:
 
 ```powershell

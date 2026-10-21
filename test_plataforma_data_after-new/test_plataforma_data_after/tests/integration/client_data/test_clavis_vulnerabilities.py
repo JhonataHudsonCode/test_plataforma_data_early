@@ -10,6 +10,7 @@ from src.config.settings import ClientTarget
 from src.repositories.cognito_client_repository import CognitoClientRepository
 from src.repositories.opensearch_vulnerability_repository import OpenSearchVulnerabilityRepository
 from src.services.client_validation_report import ClientValidationReport
+from src.services.opensearch_concurrency import validate_targets_on_product_opensearch
 from src.validators.after_pipeline.opensearch_aliases_validator import (
     OpenSearchAliasesValidator,
 )
@@ -71,10 +72,13 @@ def test_should_validate_current_asset_index_after_pipeline(
     client_targets: list[ClientTarget],
 ) -> None:
     validator = ProductDataValidator(product_repository, cognito_client_repository)
-    results = [
-        (target.client_id, *validator.validate_current_asset_index(target))
-        for target in client_targets
-    ]
+    results = validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: (
+            target.client_id,
+            *validator.validate_current_asset_index(target),
+        ),
+    )
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
@@ -89,10 +93,10 @@ def test_should_validate_assets_observability_software_variation_after_pipeline(
     client_targets: list[ClientTarget],
 ) -> None:
     validator = ProductDataValidator(product_repository, cognito_client_repository)
-    results = [
-        (target.client_id, *validator.validate_assets(target))
-        for target in client_targets
-    ]
+    results = validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: (target.client_id, *validator.validate_assets(target)),
+    )
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
@@ -110,10 +114,10 @@ def test_should_validate_asset_vulnerability_historical_after_pipeline(
         product_repository,
         cognito_client_repository,
     )
-    results = [
-        (target.client_id, *validator.validate(target))
-        for target in client_targets
-    ]
+    results = validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: (target.client_id, *validator.validate(target)),
+    )
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
@@ -128,10 +132,10 @@ def test_should_validate_compliance_after_pipeline(
     client_targets: list[ClientTarget],
 ) -> None:
     validator = ProductDataValidator(product_repository, cognito_client_repository)
-    results = [
-        (target.client_id, *validator.validate_compliance(target))
-        for target in client_targets
-    ]
+    results = validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: (target.client_id, *validator.validate_compliance(target)),
+    )
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
@@ -146,10 +150,10 @@ def test_should_validate_score_history_after_pipeline(
     client_targets: list[ClientTarget],
 ) -> None:
     validator = ProductDataValidator(product_repository, cognito_client_repository)
-    results = [
-        (target.client_id, *validator.validate_score_history(target))
-        for target in client_targets
-    ]
+    results = validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: (target.client_id, *validator.validate_score_history(target)),
+    )
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 
@@ -164,10 +168,10 @@ def test_should_validate_oto_dashboard_after_pipeline(
     client_targets: list[ClientTarget],
 ) -> None:
     validator = ProductDataValidator(product_repository, cognito_client_repository)
-    results = [
-        (target.client_id, *validator.validate_oto_dashboard(target))
-        for target in client_targets
-    ]
+    results = validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: (target.client_id, *validator.validate_oto_dashboard(target)),
+    )
     _assert_validation(results, inspect.currentframe().f_code.co_name)
 
 

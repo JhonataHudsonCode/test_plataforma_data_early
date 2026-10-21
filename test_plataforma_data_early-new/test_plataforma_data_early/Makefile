@@ -3,15 +3,6 @@
 PYTHON ?= python3.14
 PYTEST_TARGETS ?= tests
 PYTEST_K ?=
-PYTEST_WORKERS ?=
-PYTEST_PARALLEL ?=
-PYTEST_DIST ?= load
-
-# PYTEST_PARALLEL define se todos os testes selecionados rodam em processos
-# paralelos. PYTEST_K filtra os nomes antes de iniciar a execução.
-define pytest_parallel_args
-$(shell $(PYTHON) -c "from dotenv import dotenv_values; env=dotenv_values('$(1)'); enabled=('$(PYTEST_PARALLEL)' or env.get('PYTEST_PARALLEL', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}; workers='$(PYTEST_WORKERS)' or env.get('PYTEST_WORKERS', '2'); print(f'-n {workers} --dist=$(PYTEST_DIST)' if enabled else '')")
-endef
 
 define pytest_k_args
 $(if $(strip $(PYTEST_K)),-k "$(PYTEST_K)")
@@ -22,13 +13,13 @@ install:
 	$(PYTHON) -m pip install -r requirements.txt
 
 test-hml:
-	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest $(PYTEST_TARGETS) $(call pytest_k_args) $(call pytest_parallel_args,.env.hml)
+	TEST_ENV=hml CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest $(PYTEST_TARGETS) $(call pytest_k_args)
 
 test-hml-database:
-	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest $(PYTEST_TARGETS) $(call pytest_k_args) $(call pytest_parallel_args,.env.hml)
+	TEST_ENV=hml CLIENT_SELECTION_SOURCE=database $(PYTHON) -m pytest $(PYTEST_TARGETS) $(call pytest_k_args)
 
 test-prod:
-	TEST_ENV=prod CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest $(PYTEST_TARGETS) $(call pytest_k_args) $(call pytest_parallel_args,.env.prod)
+	TEST_ENV=prod CLIENT_SELECTION_SOURCE=credentials $(PYTHON) -m pytest $(PYTEST_TARGETS) $(call pytest_k_args)
 
 clean:
 	rm -rf .pytest_cache

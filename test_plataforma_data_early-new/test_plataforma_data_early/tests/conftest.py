@@ -51,20 +51,10 @@ def _report_has_failures(report: str) -> bool:
     )
 
 
-def _is_xdist_worker(config: pytest.Config) -> bool:
-    """Indica se o processo atual é um worker do pytest-xdist."""
-    return hasattr(config, "workerinput")
-
-
 def pytest_sessionstart(session):
     """
     Executado quando a sessão de testes começa. Aqui, podemos realizar ações de configuração ou inicialização.
     """
-
-    # A limpeza deve ocorrer apenas no controlador. Os workers compartilham os
-    # diretórios de relatórios e não podem removê-los durante a execução.
-    if _is_xdist_worker(session.config):
-        return
 
     session._validation_started_at = perf_counter()
     allure_results_path = Path("allure-results")
@@ -140,11 +130,6 @@ def pytest_sessionfinish(session, exitstatus):
     """
     Executado quando toda a sessão de testes termina. Aqui, podemos realizar ações de limpeza ou relatórios finais.
     """
-
-    # A consolidação, e-mail e ZIP são responsabilidades exclusivas do
-    # controlador, após todos os workers terminarem.
-    if _is_xdist_worker(session.config):
-        return
 
     general_report_name = "relatorio_geral.txt"
     report_paths = sorted(

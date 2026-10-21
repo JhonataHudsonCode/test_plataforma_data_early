@@ -11,6 +11,10 @@ from src.repositories.opensearch_vulnerability_repository import (
 )
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
 from src.services.client_validation_report import ClientValidationReport
+from src.services.opensearch_concurrency import (
+    validate_targets_by_opensearch,
+    validate_targets_on_product_opensearch,
+)
 from src.validators.client_data.database.activation_key_validator import ActivationKeyValidator
 from src.validators.client_data.database.clients_database_validator import ClientsDatabaseValidator
 from src.validators.client_data.database.wazuh_key_validator import WazuhKeyValidator
@@ -59,8 +63,11 @@ def test_should_validate_has_rsa_opensearch_client(
     test_name = inspect.currentframe().f_code.co_name
 
     validator = RsaIndexValidator(db_client_repository, client_repository, today)
-    for target in client_targets:
-        result = validator.validate(target)
+    for result in validate_targets_by_opensearch(
+        client_targets,
+        validator.validate,
+        lambda target: target.host,
+    ):
         report.add_client_result(
             result.client_id,
             result.failures,
@@ -80,8 +87,11 @@ def test_should_validate_has_alerts_opensearch_client(
     today = date.today()
     test_name = inspect.currentframe().f_code.co_name
     validator = AlertsIndexValidator(db_client_repository, client_repository, today)
-    for target in client_targets:
-        result = validator.validate(target)
+    for result in validate_targets_by_opensearch(
+        client_targets,
+        validator.validate,
+        lambda target: target.host,
+    ):
         report.add_client_result(
             result.client_id,
             result.failures,
@@ -105,8 +115,11 @@ def test_should_validate_rules_opensearch_client(
         client_repository,
         today,
     )
-    for target in client_targets:
-        result = validator.validate(target)
+    for result in validate_targets_by_opensearch(
+        client_targets,
+        validator.validate,
+        lambda target: target.host,
+    ):
         report.add_client_result(
             result.client_id,
             result.failures,
@@ -131,8 +144,10 @@ def test_should_validate_vulnerability_opensearch_product(
         product_repository,
         today,
     )
-    for target in client_targets:
-        result = validator.validate(target)
+    for result in validate_targets_on_product_opensearch(
+        client_targets,
+        validator.validate,
+    ):
         report.add_client_result(
             result.client_id,
             result.failures,
@@ -152,8 +167,10 @@ def test_should_validate_epss_opensearch_product(
     test_name = inspect.currentframe().f_code.co_name
     today = date.today()
     validator = EpssIndexValidator(product_repository, today)
-    for target in client_targets:
-        result = validator.validate(target.client_id)
+    for result in validate_targets_on_product_opensearch(
+        client_targets,
+        lambda target: validator.validate(target.client_id),
+    ):
         report.add_client_result(
             result.client_id,
             result.failures,
@@ -187,8 +204,11 @@ def test_should_validate_axur_opensearch_client(
     today = date.today()
     test_name = inspect.currentframe().f_code.co_name
     validator = AxurIndexValidator(db_client_repository, client_repository, today)
-    for target in client_targets:
-        result = validator.validate(target)
+    for result in validate_targets_by_opensearch(
+        client_targets,
+        validator.validate,
+        lambda target: target.host,
+    ):
         report.add_client_result(result.client_id, result.failures, result.infos, result.details)
     _save_client_report(report, test_name)
     report.assert_no_failures()
@@ -242,4 +262,4 @@ def test_should_validate_clients_alert_clients(
     report.assert_no_failures()
     return
 
-            
+

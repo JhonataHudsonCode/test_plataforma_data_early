@@ -189,6 +189,20 @@ As flags e módulos continuam sendo consultados no database `cognito`; as tabela
 de activation keys, clients e alertClients usam uma conexão separada com o
 database `clients`.
 
+## Concorrência de OpenSearch
+
+Os testes são executados sequencialmente pelo Pytest. Dentro de uma validação que
+percorre `client_targets`, os clientes são processados concorrentemente, com no
+máximo cinco validações por OpenSearch. Para os endpoints Octopus, o limite é
+independente por host; para `OPENSEARCH_HOST`, o limite é compartilhado por todos
+os clientes do teste.
+
+```env
+OPENSEARCH_MAX_CONCURRENT_REQUESTS=5
+```
+
+O valor permitido é de `1` a `5`; valores acima de cinco são limitados a cinco.
+
 ## 6. Allure
 
 Os resultados são gravados automaticamente em:
