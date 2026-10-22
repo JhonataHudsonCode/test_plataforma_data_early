@@ -66,6 +66,7 @@ def _assert_validation(
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 def test_should_validate_current_asset_index_after_pipeline(
     cognito_client_repository: CognitoClientRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -87,6 +88,7 @@ def test_should_validate_current_asset_index_after_pipeline(
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch 
+@pytest.mark.opensearch_product
 def test_should_validate_assets_observability_software_variation_after_pipeline(
     cognito_client_repository: CognitoClientRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -105,6 +107,7 @@ def test_should_validate_assets_observability_software_variation_after_pipeline(
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 def test_should_validate_asset_vulnerability_historical_after_pipeline(
     cognito_client_repository: CognitoClientRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -126,6 +129,7 @@ def test_should_validate_asset_vulnerability_historical_after_pipeline(
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 def test_should_validate_compliance_after_pipeline(
     cognito_client_repository: CognitoClientRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -144,6 +148,7 @@ def test_should_validate_compliance_after_pipeline(
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 def test_should_validate_score_history_after_pipeline(
     cognito_client_repository: CognitoClientRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -162,6 +167,7 @@ def test_should_validate_score_history_after_pipeline(
 @pytest.mark.after_pipeline
 @pytest.mark.client_data
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 def test_should_validate_oto_dashboard_after_pipeline(
     cognito_client_repository: CognitoClientRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -179,6 +185,7 @@ def test_should_validate_oto_dashboard_after_pipeline(
 @pytest.mark.integration
 @pytest.mark.after_pipeline
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 def test_should_validate_opensearch_aliases_after_pipeline(
     product_repository: OpenSearchVulnerabilityRepository,
 ) -> None:

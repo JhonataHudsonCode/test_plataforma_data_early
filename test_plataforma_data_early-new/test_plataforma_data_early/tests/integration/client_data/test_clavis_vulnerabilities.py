@@ -127,6 +127,7 @@ def test_should_validate_rules_opensearch_client(
     report.assert_no_failures()
 
 @allure.title("Validar os índices de vulnerabilidades Was e vm-new no OpenSearch do produto")
+@pytest.mark.opensearch_product
 def test_should_validate_vulnerability_opensearch_product(
     db_client_repository: DataBaseRepository,
     product_repository: OpenSearchVulnerabilityRepository,
@@ -156,6 +157,7 @@ def test_should_validate_vulnerability_opensearch_product(
     return
 
 @allure.title("Validar data de criação do indice EPSS")
+@pytest.mark.opensearch_product
 def test_should_validate_epss_opensearch_product(
     product_repository: OpenSearchVulnerabilityRepository,
     client_targets,
@@ -179,6 +181,7 @@ def test_should_validate_epss_opensearch_product(
     return
 
 @allure.title("Validar que índice de produto cve_trends existe e tenha documentos com status ativo")
+@pytest.mark.opensearch_product
 def test_should_validate_cve_trends_opensearch_product(
     product_repository: OpenSearchVulnerabilityRepository,
 ) -> None:

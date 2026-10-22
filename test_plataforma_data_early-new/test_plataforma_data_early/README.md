@@ -202,12 +202,17 @@ todos os clientes do teste.
 ```env
 OPENSEARCH_MAX_CONCURRENT_CLIENTS=5
 PYTEST_XDIST_WORKERS=2
+OPENSEARCH_PRODUCT_SERIAL=true
 ```
 
 O valor permitido é de `1` a `5`; valores acima de cinco são limitados a cinco.
 `PYTEST_XDIST_WORKERS` controla quantos cenários Pytest rodam em paralelo; o
 valor padrão é `2`. Assim, com a configuração acima, no máximo dois cenários e
 cinco clientes por cenário são executados em paralelo.
+
+Quando `OPENSEARCH_PRODUCT_SERIAL=true`, todos os cenários que consultam o
+OpenSearch de produto compartilhado são enviados ao mesmo worker e executados
+um por vez, mesmo com dois workers ativos.
 
 ## 6. Allure
 

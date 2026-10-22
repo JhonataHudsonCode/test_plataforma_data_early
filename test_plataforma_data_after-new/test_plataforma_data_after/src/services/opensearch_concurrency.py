@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TypeVar
@@ -10,6 +11,7 @@ Target = TypeVar("Target")
 Result = TypeVar("Result")
 
 _DEFAULT_MAX_REQUESTS_PER_OPENSEARCH = 5
+logger = logging.getLogger(__name__)
 
 
 def _max_requests_per_opensearch() -> int:
@@ -77,4 +79,31 @@ def validate_targets_on_product_opensearch(
     validate: Callable[[Target], Result],
 ) -> list[Result]:
     """Executa no máximo cinco validações no OpenSearch de produto compartilhado."""
-    return validate_targets_by_opensearch(targets, validate, lambda _target: "product")
+    items = list(targets)
+    if not items:
+        return []
+
+    limit = min(len(items), _max_requests_per_opensearch())
+    first_batch = ", ".join(
+        str(getattr(target, "client_id", target)) for target in items[:limit]
+    )
+    logger.info(
+        "OpenSearch de produto | %s cliente(s) encontrado(s); primeiro lote "
+        "com até %s cliente(s): %s.",
+        len(items),
+        limit,
+        first_batch,
+    )
+
+    def validate_with_log(target: Target) -> Result:
+        client_id = str(getattr(target, "client_id", target))
+        logger.info("OpenSearch de produto | iniciando validação do cliente %s.", client_id)
+        try:
+            result = validate(target)
+        except Exception:
+            logger.exception("OpenSearch de produto | falha no cliente %s.", client_id)
+            raise
+        logger.info("OpenSearch de produto | validação concluída para o cliente %s.", client_id)
+        return result
+
+    return validate_targets_by_opensearch(items, validate_with_log, lambda _target: "product")

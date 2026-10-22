@@ -10,7 +10,7 @@ $(shell $(PYTHON) -c "from dotenv import dotenv_values; print('$(PYTEST_XDIST_WO
 endef
 
 define pytest_xdist_args
--n $(call pytest_xdist_workers,$(1)) --dist=load
+-n $(call pytest_xdist_workers,$(1)) --dist=loadgroup
 endef
 
 define pytest_k_args
