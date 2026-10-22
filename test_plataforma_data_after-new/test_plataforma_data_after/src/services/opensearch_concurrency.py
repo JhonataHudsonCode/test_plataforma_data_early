@@ -84,15 +84,10 @@ def validate_targets_on_product_opensearch(
         return []
 
     limit = min(len(items), _max_requests_per_opensearch())
-    first_batch = ", ".join(
-        str(getattr(target, "client_id", target)) for target in items[:limit]
-    )
     logger.info(
-        "OpenSearch de produto | %s cliente(s) encontrado(s); primeiro lote "
-        "com até %s cliente(s): %s.",
+        "OpenSearch de produto | %s cliente(s) encontrado(s); lotes de até %s cliente(s).",
         len(items),
         limit,
-        first_batch,
     )
 
     def validate_with_log(target: Target) -> Result:
@@ -106,4 +101,20 @@ def validate_targets_on_product_opensearch(
         logger.info("OpenSearch de produto | validação concluída para o cliente %s.", client_id)
         return result
 
-    return validate_targets_by_opensearch(items, validate_with_log, lambda _target: "product")
+    results: list[Result] = []
+    for start in range(0, len(items), limit):
+        batch = items[start : start + limit]
+        batch_number = start // limit + 1
+        client_ids = ", ".join(
+            str(getattr(target, "client_id", target)) for target in batch
+        )
+        logger.info(
+            "OpenSearch de produto | lote %s | clientes: %s.",
+            batch_number,
+            client_ids,
+        )
+        results.extend(
+            validate_targets_by_opensearch(batch, validate_with_log, lambda _target: "product")
+        )
+
+    return results
