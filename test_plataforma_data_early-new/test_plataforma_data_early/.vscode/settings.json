@@ -3,7 +3,12 @@
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
   "python.testing.pytestArgs": [
-    "tests"
+    "tests",
+    "-o",
+    "log_cli=true",
+    "--log-cli-level=INFO",
+    "-o",
+    "log_cli_format=%(asctime)s | %(threadName)s | %(name)s | %(message)s"
   ],
   "python.analysis.extraPaths": [
     "${workspaceFolder}"

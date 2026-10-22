@@ -33,7 +33,6 @@ def _with_wazuh_api_port(endpoint: str) -> str:
 @pytest.mark.integration
 @pytest.mark.client_data
 @pytest.mark.postgres
-@pytest.mark.opensearch
 def test_should_authenticate_wazuh_clients(
     wazuh_credentials: WazuhCredentials | None,
     request: pytest.FixtureRequest,

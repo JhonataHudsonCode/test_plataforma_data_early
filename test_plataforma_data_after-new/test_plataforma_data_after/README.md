@@ -62,7 +62,6 @@ OpenSearch de produto (`OPENSEARCH_HOST`).
 ```env
 OPENSEARCH_MAX_CONCURRENT_CLIENTS=5
 PYTEST_XDIST_WORKERS=2
-OPENSEARCH_PRODUCT_SERIAL=true
 ```
 
 O valor permitido é de `1` a `5`; valores acima de cinco são limitados a cinco.
@@ -70,9 +69,10 @@ O valor permitido é de `1` a `5`; valores acima de cinco são limitados a cinco
 valor padrão é `2`. Assim, com a configuração acima, no máximo dois cenários e
 cinco clientes por cenário são executados em paralelo.
 
-Quando `OPENSEARCH_PRODUCT_SERIAL=true`, todos os cenários que consultam o
-OpenSearch de produto compartilhado são enviados ao mesmo worker e executados
-um por vez, mesmo com dois workers ativos.
+Todos os cenários que consultam o OpenSearch de produto compartilhado são
+sempre enviados ao mesmo worker e executados um por vez, mesmo com dois workers
+ativos. Esse comportamento é fixo para impedir consultas simultâneas ao host
+central.
 
 O resultado bruto do Allure fica em `reports/allure-results`. Para gerar a interface visual, instale o Allure CLI e execute:
 

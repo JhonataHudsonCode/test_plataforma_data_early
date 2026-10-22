@@ -1,7 +1,12 @@
 {   "python.envFile": "${workspaceFolder}/.env.prod",
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "python.testing.pytestArgs": [
-        "tests"
+        "tests",
+        "-o",
+        "log_cli=true",
+        "--log-cli-level=INFO",
+        "-o",
+        "log_cli_format=%(asctime)s | %(threadName)s | %(name)s | %(message)s"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true

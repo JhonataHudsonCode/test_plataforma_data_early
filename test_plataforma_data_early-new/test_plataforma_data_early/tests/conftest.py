@@ -46,10 +46,6 @@ COGNITO_DATABASE = "cognito"
 
 def pytest_collection_modifyitems(config, items):
     """Mantém os cenários do OpenSearch de produto no mesmo worker xdist."""
-    serial_product_tests = os.getenv("OPENSEARCH_PRODUCT_SERIAL", "true")
-    if serial_product_tests.strip().lower() not in {"1", "true", "yes", "on"}:
-        return
-
     for item in items:
         if item.get_closest_marker("opensearch_product"):
             item.add_marker(pytest.mark.xdist_group("opensearch-product"))

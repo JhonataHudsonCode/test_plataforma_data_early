@@ -7,6 +7,7 @@ from src.repositories.db_client_repository import DataBaseRepository
 from src.repositories.opensearch_client_rsa_repository import OpenSearchClientRepository
 from src.repositories.opensearch_health_repository import OpenSearchHealthRepository
 from src.services.client_validation_report import ClientValidationReport
+from src.services.opensearch_concurrency import validate_client_targets
 
 
 def _save_opensearch_report(
@@ -27,6 +28,7 @@ def _save_opensearch_report(
 
 @pytest.mark.integration
 @pytest.mark.opensearch
+@pytest.mark.opensearch_product
 @allure.title("Validar a comunicação com o OpenSearch de produto")
 def test_should_connect_to_opensearch(
     opensearch_repository: OpenSearchHealthRepository,
@@ -95,21 +97,31 @@ def test_should_connect_to_saas_client_opensearch(
         assert targets, "Nenhuma credencial foi configurada em OCTOPUS_CLIENT_CREDENTIALS."
 
     failures: list[str] = []
+    valid_targets: list[tuple[str, str]] = []
     for client_id, endpoint in targets:
         if not endpoint:
             failures.append(
                 f"Cliente '{client_id}' | octopus_endpoint nao configurado."
             )
             continue
+        valid_targets.append((client_id, endpoint))
 
-        if not client_repository.check_connection(endpoint):
-            failures.append(
-                f"Cliente '{client_id}' | sem comunicacao com o OpenSearch em '{endpoint}'."
+    def validate_target(target: tuple[str, str]) -> tuple[bool, str]:
+        client_id, endpoint = target
+        if client_repository.check_connection(endpoint):
+            return (
+                True,
+                f"Cliente '{client_id}' | comunicacao com o OpenSearch em "
+                f"'{endpoint}' validada com sucesso.",
             )
-        else:
-            details.append(
-                f"Cliente '{client_id}' | comunicacao com o OpenSearch em '{endpoint}' validada com sucesso."
-            )
+        return (
+            False,
+            f"Cliente '{client_id}' | sem comunicacao com o OpenSearch em "
+            f"'{endpoint}'.",
+        )
+
+    for is_connected, message in validate_client_targets(valid_targets, validate_target):
+        (details if is_connected else failures).append(message)
 
     report.add_client_result(
         "OpenSearch Cliente",
