@@ -9,6 +9,8 @@ from src.connections.base import BaseConnection
 class OpenSearchConnection(BaseConnection[OpenSearch]):
     """Base extensível para testes de integração com OpenSearch."""
 
+    _POOL_MAXSIZE = 5
+
     def __init__(self, settings: OpenSearchSettings) -> None:
         self._settings = settings
         self._client: OpenSearch | None = None
@@ -25,6 +27,7 @@ class OpenSearchConnection(BaseConnection[OpenSearch]):
                 http_auth=(self._settings.user, self._settings.password),
                 use_ssl=self._settings.use_ssl,
                 verify_certs=self._settings.verify_certs,
+                pool_maxsize=self._POOL_MAXSIZE,
             )
 
         return self._client

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class OpenSearchClientRepository:
     """Valida índices RSA no OpenSearch específico de cada cliente."""
 
-    _DOCUMENT_PAGE_SIZE = 500
+    _DOCUMENT_LIMIT = 500
 
     def __init__(self, connection_factory: OpenSearchConnectionFactory) -> None:
         self._connection_factory = connection_factory
@@ -26,60 +26,35 @@ class OpenSearchClientRepository:
         index_name: str,
         query: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Busca todos os documentos da consulta em páginas consistentes.
-
-        O scroll evita o limite ``index.max_result_window`` e mantém uma visão
-        estável da busca enquanto cada página é processada.
-        """
+        """Retorna somente os primeiros 500 documentos da consulta."""
         connection = self._connection_factory.create_for_host(client_host)
-        scroll_id: str | None = None
-        documents: list[dict[str, Any]] = []
 
         try:
             response = connection.client.search(
                 index=index_name,
-                scroll="2m",
                 body={
-                    "size": self._DOCUMENT_PAGE_SIZE,
-                    "track_total_hits": True,
-                    "sort": ["_doc"],
+                    "size": self._DOCUMENT_LIMIT,
                     "query": query,
                 },
             )
-            scroll_id = response.get("_scroll_id")
-            hits = response.get("hits", {}).get("hits", [])
-            total = response.get("hits", {}).get("total", 0)
-            expected_total = total.get("value", 0) if isinstance(total, dict) else total
-
-            while hits:
-                documents.extend(hits)
-                if not scroll_id:
-                    break
-                response = connection.client.scroll(scroll_id=scroll_id, scroll="2m")
-                scroll_id = response.get("_scroll_id", scroll_id)
-                hits = response.get("hits", {}).get("hits", [])
+            documents = response.get("hits", {}).get("hits", [])
 
             logger.info(
-                "Consulta paginada no índice %s do host %s: %s de %s documento(s) retornados.",
+                "Consulta limitada no índice %s do host %s: %s documento(s), máximo %s.",
                 index_name,
                 client_host,
                 len(documents),
-                expected_total,
+                self._DOCUMENT_LIMIT,
             )
             return documents
         except Exception as error:
             message = (
-                f"Não foi possível buscar todos os documentos do índice '{index_name}' "
+                f"Não foi possível buscar documentos do índice '{index_name}' "
                 f"no host '{client_host}': {error.__class__.__name__}: {error}"
             )
             logger.exception(message)
             raise RuntimeError(message) from error
         finally:
-            if scroll_id:
-                try:
-                    connection.client.clear_scroll(scroll_id=scroll_id)
-                except Exception:
-                    logger.warning("Não foi possível limpar o scroll do índice %s.", index_name)
             connection.close()
 
     def check_connection(self, client_host: str) -> bool:
