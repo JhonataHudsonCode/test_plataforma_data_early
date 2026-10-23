@@ -52,13 +52,6 @@ def _report_has_failures(report: str) -> bool:
     )
 
 
-def pytest_collection_modifyitems(config, items):
-    """Mantém os cenários do OpenSearch de produto no mesmo worker xdist."""
-    for item in items:
-        if item.get_closest_marker("opensearch_product"):
-            item.add_marker(pytest.mark.xdist_group("opensearch-product"))
-
-
 def _send_report_email(
     email_service: EmailService,
     subject: str,
