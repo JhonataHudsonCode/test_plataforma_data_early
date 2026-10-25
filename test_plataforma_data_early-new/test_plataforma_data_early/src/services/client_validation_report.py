@@ -9,6 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from pathlib import Path
 from datetime import datetime, timedelta
 from time import perf_counter
+from src.services.report_html_layout import render_html_from_text
 
 
 class _ClientReportLogHandler(logging.Handler):
@@ -137,7 +138,7 @@ class ClientValidationReport:
         elapsed_seconds: float | None = None,
     ) -> str:
         """Consolida os relatórios mantendo todos os clientes sob cada teste."""
-        grouped_results: list[tuple[str, dict[str, list[tuple[str, list[str]]]]]] = []
+        grouped_results: list[tuple[str, str, dict[str, list[tuple[str, list[str]]]]]] = []
         for report_path in report_paths:
             report_content = report_path.read_text(encoding="utf-8")
             test_name = next(
@@ -148,7 +149,17 @@ class ClientValidationReport:
                 ),
                 report_path.stem,
             )
-            grouped_results.append((test_name, cls._parse_sections(report_content)))
+            scenario_duration = next(
+                (
+                    line.removeprefix("Duração: ")
+                    for line in report_content.splitlines()
+                    if line.startswith("Duração:")
+                ),
+                "00:00:00",
+            )
+            grouped_results.append(
+                (test_name, scenario_duration, cls._parse_sections(report_content))
+            )
 
         duration = str(timedelta(seconds=int(elapsed_seconds or 0)))
         lines = [
@@ -162,8 +173,10 @@ class ClientValidationReport:
             "",
             "Resultados por teste:",
         ]
-        for test_name, sections in grouped_results:
-            lines.extend(("", f"Teste executado: {test_name}"))
+        for test_name, scenario_duration, sections in grouped_results:
+            lines.extend(
+                ("", f"Teste executado: {test_name}", f"Duração do cenário: {scenario_duration}")
+            )
             for section, label in (
                 ("Falhas", "Motivo"),
                 ("Informativos", "Informação"),
@@ -297,6 +310,12 @@ class ClientValidationReport:
         html_path: str | Path,
     ) -> str:
         """Gera uma versão visual do relatório TXT para revisão e email."""
+        html = render_html_from_text(report_path)
+        output_path = Path(html_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(html, encoding="utf-8")
+        return html
+
         source_path = Path(report_path)
         report = source_path.read_text(encoding="utf-8")
         lines = report.splitlines()

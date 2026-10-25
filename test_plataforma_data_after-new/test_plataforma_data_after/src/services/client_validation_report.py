@@ -9,6 +9,7 @@ from time import perf_counter
 from html import escape
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
+from src.services.report_html_layout import render_html_from_text
 
 
 _CURRENT_TEST_STARTED_AT: ContextVar[float | None] = ContextVar(
@@ -79,7 +80,7 @@ class ClientValidationReport:
         elapsed_seconds: float | None = None,
     ) -> str:
         """Gera um relatório único agrupando todos os clientes por teste."""
-        grouped_results: list[tuple[str, dict[str, list[tuple[str, list[str]]]]]] = []
+        grouped_results: list[tuple[str, str, dict[str, list[tuple[str, list[str]]]]]] = []
 
         for report_path in report_paths:
             report_content = report_path.read_text(encoding="utf-8")
@@ -91,7 +92,17 @@ class ClientValidationReport:
                 ),
                 report_path.stem,
             )
-            grouped_results.append((test_name, cls._parse_sections(report_content)))
+            scenario_duration = next(
+                (
+                    line.removeprefix("Duração: ")
+                    for line in report_content.splitlines()
+                    if line.startswith("Duração:")
+                ),
+                "00:00:00",
+            )
+            grouped_results.append(
+                (test_name, scenario_duration, cls._parse_sections(report_content))
+            )
 
         duration = cls._format_duration(elapsed_seconds or 0)
         lines = [
@@ -105,8 +116,10 @@ class ClientValidationReport:
             "",
             "Resultados por teste:",
         ]
-        for test_name, sections in grouped_results:
-            lines.extend(("", f"Teste executado: {test_name}"))
+        for test_name, scenario_duration, sections in grouped_results:
+            lines.extend(
+                ("", f"Teste executado: {test_name}", f"Duração do cenário: {scenario_duration}")
+            )
             for section, label in (
                 ("Falhas", "Motivo"),
                 ("Informativos", "Informação"),
@@ -248,6 +261,12 @@ class ClientValidationReport:
 
     @staticmethod
     def write_html_from_text(report_path: str | Path, html_path: str | Path) -> str:
+        html = render_html_from_text(report_path)
+        output_path = Path(html_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(html, encoding="utf-8")
+        return html
+
         report = Path(report_path).read_text(encoding="utf-8")
         title = next(
             (line.removeprefix("Teste: ") for line in report.splitlines() if line.startswith("Teste:")),
