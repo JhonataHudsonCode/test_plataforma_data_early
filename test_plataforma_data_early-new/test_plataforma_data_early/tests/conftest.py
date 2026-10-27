@@ -7,10 +7,12 @@ import pytest
 import subprocess
 import shutil
 from time import perf_counter
+from datetime import datetime, timezone
 
 from pathlib import Path
 from src.services.email_service import EmailService
 from src.services.client_validation_report import ClientValidationReport
+from src.services.report_database import persist_session_safely, record_pytest_outcome
 
 from src.config.settings import (
     ClientOpenSearchCredentials,
@@ -42,6 +44,7 @@ from src.repositories.postgres_catalog_repository import PostgresCatalogReposito
 
 
 COGNITO_DATABASE = "cognito"
+_REPORT_DB_OUTCOMES: dict = {}
 
 
 def pytest_collection_modifyitems(config, items):
@@ -70,6 +73,9 @@ def pytest_sessionstart(session):
         return
 
     session._validation_started_at = perf_counter()
+    session._report_db_started_at = datetime.now(timezone.utc)
+    _REPORT_DB_OUTCOMES.clear()
+    session.config._report_db_outcomes = _REPORT_DB_OUTCOMES
     allure_results_path = Path("allure-results")
     if allure_results_path.exists() and allure_results_path.is_dir():
         shutil.rmtree(allure_results_path)
@@ -84,6 +90,10 @@ def pytest_sessionstart(session):
         report_path = client_report_path / report_name
         if report_path.exists():
             report_path.unlink()
+
+
+def pytest_runtest_logreport(report):
+    record_pytest_outcome(_REPORT_DB_OUTCOMES, report)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -155,6 +165,7 @@ def pytest_sessionfinish(session, exitstatus):
         for path in Path("reports/client-validation").glob("*.txt")
         if path.name != general_report_name
     )
+    persist_session_safely(session, exitstatus, "early", report_paths)
     if report_paths:
         general_report_path = Path("reports/client-validation") / general_report_name
         ClientValidationReport.write_combined(

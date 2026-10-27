@@ -1,5 +1,8 @@
 # Testes pós-pipeline da Plataforma Data
 
+Para armazenar os resultados de teste em um PostgreSQL dedicado, consulte
+`docs/report_database.md`.
+
 Suíte de testes de integração em Python que confirma se os dados publicados após o pipeline estão disponíveis e consistentes no PostgreSQL e no OpenSearch.
 
 ## O que é validado

@@ -1,5 +1,8 @@
 # QA Integration Tests
 
+Para armazenar os resultados de teste em um PostgreSQL dedicado, consulte
+`docs/report_database.md`.
+
 Repositório-base de testes de integração em Python + Pytest.
 
 ## Objetivo

@@ -6,10 +6,12 @@ import pytest
 import subprocess
 import shutil
 from time import perf_counter
+from datetime import datetime, timezone
 
 from pathlib import Path
 from src.services.email_service import EmailService
 from src.services.client_validation_report import ClientValidationReport
+from src.services.report_database import persist_session_safely, record_pytest_outcome
 
 from src.config.settings import (
     ClientOpenSearchCredentials,
@@ -40,6 +42,7 @@ from src.services.s3_service import S3Service
 import os
 
 COGNITO_DATABASE = "cognito"
+_REPORT_DB_OUTCOMES: dict = {}
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ALLURE_RESULTS_DIRECTORY = PROJECT_ROOT / "allure-results"
 CLIENT_REPORTS_DIRECTORY = PROJECT_ROOT / "reports" / "client-validation"
@@ -84,6 +87,9 @@ def pytest_sessionstart(session):
         return
 
     session._validation_started_at = perf_counter()
+    session._report_db_started_at = datetime.now(timezone.utc)
+    _REPORT_DB_OUTCOMES.clear()
+    session.config._report_db_outcomes = _REPORT_DB_OUTCOMES
     if ALLURE_RESULTS_DIRECTORY.exists() and ALLURE_RESULTS_DIRECTORY.is_dir():
         shutil.rmtree(ALLURE_RESULTS_DIRECTORY)
     ALLURE_RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
@@ -111,6 +117,10 @@ def measure_validation_test_duration() -> Generator[None, None, None]:
     token = ClientValidationReport.start_current_test_timer()
     yield
     ClientValidationReport.reset_current_test_timer(token)
+
+
+def pytest_runtest_logreport(report):
+    record_pytest_outcome(_REPORT_DB_OUTCOMES, report)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -159,6 +169,7 @@ def pytest_sessionfinish(session, exitstatus):
         for path in CLIENT_REPORTS_DIRECTORY.glob("*.txt")
         if path.name != general_report_name
     )
+    persist_session_safely(session, exitstatus, "after", report_paths)
     if report_paths:
         ClientValidationReport.write_combined(
             report_paths,
