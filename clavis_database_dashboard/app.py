@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import pandas as pd
+import psycopg
+import streamlit as st
+
+from src.analysis import SCENARIO_LABELS, STATUS_LABELS, apply_filters, format_duration, scenario_summary, summarize
+from src.database import DatabaseSettings, load_results
+
+
+st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
+st.title("Dashboard de testes Clavis")
+st.caption("Resultados persistidos pelo Early e After no PostgreSQL")
+
+try:
+    settings = DatabaseSettings.from_env()
+    display_zone = ZoneInfo(os.getenv("DASHBOARD_TIMEZONE", "America/Sao_Paulo"))
+except (ValueError, ZoneInfoNotFoundError) as error:
+    st.error(f"Configuração inválida: {error}")
+    st.info("Crie o arquivo .env e configure a conexão conforme o README do projeto.")
+    st.stop()
+
+today = datetime.now(display_zone).date()
+with st.sidebar:
+    st.header("Filtros")
+    start_date = st.date_input("Data inicial", value=today - timedelta(days=30))
+    end_date = st.date_input("Data final", value=today)
+    if start_date > end_date:
+        st.error("A data inicial deve ser anterior ou igual à data final.")
+        st.stop()
+
+start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
+end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
+try:
+    data = load_results(settings, start, end)
+except (psycopg.Error, OSError):
+    st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
+    st.stop()
+
+if data.empty:
+    st.info("Nenhuma execução encontrada no período selecionado.")
+    st.stop()
+
+
+def choices(column: str) -> list[str]:
+    return sorted(data[column].dropna().astype(str).unique().tolist(), key=str.casefold)
+
+
+with st.sidebar:
+    projects = st.multiselect("Projeto", choices("project"))
+    environments = st.multiselect("Ambiente", choices("environment"))
+    test_names = st.multiselect("Cenário", choices("title"))
+    client_ids = st.multiselect("Cliente", choices("client_id"))
+    validation_types = st.multiselect("Tipo de validação", choices("validation_type"))
+    statuses = st.multiselect(
+        "Resultado da validação", ["failed", "passed", "info"],
+        format_func=lambda value: STATUS_LABELS[value],
+    )
+    st.caption("Deixe um filtro vazio para incluir todas as opções. Os filtros de cliente, validação e resultado limitam os dados exibidos.")
+
+filtered = apply_filters(data, {
+    "project": projects, "environment": environments, "title": test_names,
+    "client_id": client_ids, "validation_type": validation_types, "result_status": statuses,
+})
+if filtered.empty:
+    st.warning("Nenhum resultado corresponde aos filtros selecionados.")
+    st.stop()
+
+overview, validations = st.tabs(["Visão geral", "Validações"])
+with overview:
+    st.subheader("Resumo do período")
+    metrics = summarize(filtered)
+    row = st.columns(3)
+    row[0].metric("Execuções", metrics["runs"])
+    row[1].metric("Cenários executados", metrics["scenarios"])
+    row[2].metric("Clientes identificados", metrics["clients"])
+    row = st.columns(3)
+    row[0].metric("Validações com falha", metrics["failed"])
+    row[1].metric("Validações aprovadas", metrics["passed"])
+    row[2].metric("Validações informativas", metrics["info"])
+    st.caption("Validações contam combinações distintas de cenário, destinatário, tipo e resultado. Um cliente pode aparecer em mais de um resultado.")
+
+    st.subheader("Cenários")
+    scenarios = scenario_summary(filtered).copy()
+    scenarios["started_at"] = pd.to_datetime(scenarios["started_at"], utc=True).dt.tz_convert(display_zone).dt.strftime("%d/%m/%Y %H:%M:%S")
+    scenarios["scenario_duration_ms"] = scenarios["scenario_duration_ms"].map(format_duration)
+    scenarios["pytest_status"] = scenarios["pytest_status"].map(SCENARIO_LABELS).fillna("Não informado")
+    scenarios = scenarios.rename(columns={
+        "started_at": "Início", "project": "Projeto", "environment": "Ambiente",
+        "title": "Cenário", "test_name": "Teste", "pytest_status": "Status do Pytest",
+        "scenario_duration_ms": "Duração", "run_id": "Execução", "scenario_id": "ID do cenário",
+    })
+    st.dataframe(scenarios, hide_index=True, use_container_width=True)
+
+with validations:
+    st.subheader("Resultados por tipo de validação")
+    messages = filtered[filtered["result_id"].notna()]
+    if messages.empty:
+        st.info("Os cenários selecionados não possuem mensagens de validação registradas.")
+    else:
+        st.caption("Selecione o tipo e o cenário; em seguida, expanda o cliente para ver os detalhes.")
+        categories = sorted(messages["validation_type"].dropna().unique().tolist(), key=str.casefold)
+        if not categories:
+            st.info("Nenhum tipo de validação foi registrado para os filtros selecionados.")
+        else:
+            category = st.selectbox("Tipo de validação", categories)
+            category_data = messages[messages["validation_type"] == category]
+            options = category_data.drop_duplicates("scenario_id").set_index("scenario_id")
+
+            def scenario_label(scenario_id):
+                item = options.loc[scenario_id]
+                started = pd.to_datetime(item["started_at"], utc=True).tz_convert(display_zone).strftime("%d/%m/%Y %H:%M")
+                return f"{item['title']} · {item['project']} / {item['environment']} · {started} · #{scenario_id}"
+
+            selected_id = st.selectbox("Cenário", options.index.tolist(), format_func=scenario_label)
+            scenario_data = category_data[category_data["scenario_id"] == selected_id]
+            first = scenario_data.iloc[0]
+            st.caption(f"Duração: {format_duration(first['scenario_duration_ms'])} · Execução: {first['run_id']}")
+            for status in ("failed", "passed", "info"):
+                status_data = scenario_data[scenario_data["result_status"] == status]
+                if status_data.empty:
+                    continue
+                st.markdown(f"**{STATUS_LABELS[status]}** · {status_data['scope_label'].nunique()} destinatário(s)")
+                for scope, scope_data in status_data.groupby("scope_label", sort=True, dropna=False):
+                    with st.expander(str(scope) if pd.notna(scope) else "Não informado"):
+                        for _, message in scope_data.sort_values("sequence").iterrows():
+                            st.write(message["message"])
