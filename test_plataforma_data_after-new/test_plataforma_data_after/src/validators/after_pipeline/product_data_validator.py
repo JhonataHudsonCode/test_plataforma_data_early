@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 import math
 from pathlib import Path
@@ -523,7 +523,7 @@ class ProductDataValidator:
         details: list[str],
     ) -> None:
         """Consulta o OTO pelo índice base e compara os documentos de cada data."""
-        index_name = f"{client_id}_oto_dashboard_*"
+        index_name = f"{client_id}_oto_dashboard"
         previous_date = self._reference_date - timedelta(days=1)
         general_errors = _CategorizedMessages(errors, "Geral")
         current_documents = self._get_documents_by_timestamp_match(
@@ -550,12 +550,6 @@ class ProductDataValidator:
             f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
             f"{len(previous_documents)} em {previous_date.isoformat()}."
         )
-
-        details.append(
-            f"[Geral] Índice '{index_name}' | consulta por @timestamp retornou "
-            f"{len(current_documents)} documento(s) em {self._reference_date.isoformat()} e "
-        )
-        
 
         documents = [*current_documents, *previous_documents]
         if documents:
@@ -596,21 +590,145 @@ class ProductDataValidator:
             )
             return
 
-        current_document = current_documents[0]
-        previous_document = previous_documents[0]
-        metric_index_name = str(current_document.get("_index", index_name))
         self._run_validation_stage(
             "Comparação percentual",
             errors,
             details,
-            lambda stage_errors, stage_details: self._validate_oto_dashboard_metrics(
-                metric_index_name,
-                current_document,
-                previous_document,
+            lambda stage_errors, stage_details: self._compare_oto_document_pairs(
+                index_name,
+                current_documents,
+                previous_documents,
                 stage_errors,
                 stage_details,
             ),
         )
+
+    def _compare_oto_document_pairs(
+        self,
+        index_name: str,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+        errors: list[str],
+        details: list[str],
+    ) -> None:
+        """Compara pares únicos com horários separados por até uma hora."""
+        pairs, unmatched_current, unmatched_previous, invalid = self._match_oto_documents(
+            current_documents, previous_documents
+        )
+        for day, document_id in invalid:
+            errors.append(
+                f"Índice '{index_name}' | documento de {day} _id={document_id} sem "
+                "@timestamp válido com horário; comparação não realizada."
+            )
+
+        details.append(
+            f"Índice '{index_name}' | {len(pairs)} par(es) com diferença de horário "
+            f"de até 1 hora; {len(unmatched_current)} documento(s) de hoje e "
+            f"{len(unmatched_previous)} de ontem sem correspondência."
+        )
+        for day, unmatched in (("hoje", unmatched_current), ("ontem", unmatched_previous)):
+            if unmatched:
+                ids = ", ".join(str(document.get("_id", "não informado")) for document in unmatched)
+                details.append(
+                    f"Índice '{index_name}' | documento(s) de {day} sem par, "
+                    f"não comparados: {ids}."
+                )
+        if not pairs:
+            errors.append(
+                f"Índice '{index_name}' | nenhum par de hoje e ontem com diferença "
+                "de horário de até 1 hora; comparação percentual não realizada."
+            )
+            return
+
+        for current, previous, difference in pairs:
+            current_id = current.get("_id", "não informado")
+            previous_id = previous.get("_id", "não informado")
+            current_timestamp = self._source(current).get("@timestamp")
+            previous_timestamp = self._source(previous).get("@timestamp")
+            context = (
+                f"Índice '{index_name}' | hoje _id={current_id} (@timestamp={current_timestamp}) "
+                f"e ontem _id={previous_id} (@timestamp={previous_timestamp})"
+            )
+            details.append(f"{context} | diferença de horário: {difference}.")
+            pair_errors: list[str] = []
+            pair_details: list[str] = []
+            self._validate_oto_dashboard_metrics(
+                index_name, current, previous, pair_errors, pair_details
+            )
+            errors.extend(f"{context} | {message}" for message in pair_errors)
+            details.extend(f"{context} | {message}" for message in pair_details)
+
+    @classmethod
+    def _match_oto_documents(
+        cls,
+        current_documents: list[dict[str, Any]],
+        previous_documents: list[dict[str, Any]],
+    ) -> tuple[list[tuple[dict[str, Any], dict[str, Any], timedelta]],
+               list[dict[str, Any]], list[dict[str, Any]], list[tuple[str, str]]]:
+        """Maximiza pares sem reutilização e minimiza a diferença total de horário.
+
+        Timestamps com fuso são normalizados para UTC; sem fuso, assumimos UTC.
+        Um timestamp apenas com data não permite comparar horários.
+        """
+        invalid: list[tuple[str, str]] = []
+
+        def parse(documents: list[dict[str, Any]], day: str) -> list[tuple[datetime, int, dict[str, Any]]]:
+            parsed: list[tuple[datetime, int, dict[str, Any]]] = []
+            for position, document in enumerate(documents):
+                value = cls._source(document).get("@timestamp")
+                try:
+                    if not isinstance(value, str) or ("T" not in value and " " not in value):
+                        raise ValueError("timestamp sem horário")
+                    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    parsed.append((timestamp.astimezone(timezone.utc), position, document))
+                except (ValueError, TypeError, OverflowError):
+                    invalid.append((day, str(document.get("_id", "não informado"))))
+            return sorted(parsed, key=lambda item: (item[0], item[1]))
+
+        today = parse(current_documents, "hoje")
+        yesterday = parse(previous_documents, "ontem")
+        # Cada estado representa (quantidade de pares, diferença total em microssegundos).
+        scores = [[(0, 0) for _ in range(len(yesterday) + 1)] for _ in range(len(today) + 1)]
+        decisions = [[0 for _ in range(len(yesterday) + 1)] for _ in range(len(today) + 1)]
+        for i, (current_time, _, _) in enumerate(today, 1):
+            for j, (previous_time, _, _) in enumerate(yesterday, 1):
+                best, decision = scores[i - 1][j], 1
+                candidate = scores[i][j - 1]
+                if (candidate[0], -candidate[1]) > (best[0], -best[1]):
+                    best, decision = candidate, 2
+                difference = abs(current_time - (previous_time + timedelta(days=1)))
+                if difference <= timedelta(hours=1):
+                    prior = scores[i - 1][j - 1]
+                    micros = (difference.days * 86400 + difference.seconds) * 1_000_000 + difference.microseconds
+                    candidate = (prior[0] + 1, prior[1] + micros)
+                    if (candidate[0], -candidate[1]) > (best[0], -best[1]):
+                        best, decision = candidate, 3
+                scores[i][j], decisions[i][j] = best, decision
+
+        pairs: list[tuple[dict[str, Any], dict[str, Any], timedelta]] = []
+        used_today: set[int] = set()
+        used_yesterday: set[int] = set()
+        i, j = len(today), len(yesterday)
+        while i and j:
+            decision = decisions[i][j]
+            if decision == 3:
+                current_time, current_position, current = today[i - 1]
+                previous_time, previous_position, previous = yesterday[j - 1]
+                pairs.append((current, previous, abs(current_time - (previous_time + timedelta(days=1)))))
+                used_today.add(current_position)
+                used_yesterday.add(previous_position)
+                i, j = i - 1, j - 1
+            elif decision == 1:
+                i -= 1
+            else:
+                j -= 1
+        pairs.reverse()
+        return (pairs,
+                [document for _, position, document in today if position not in used_today],
+                [document for _, position, document in yesterday if position not in used_yesterday],
+                invalid)
 
     def _validate_oto_timestamp_documents(
         self,
