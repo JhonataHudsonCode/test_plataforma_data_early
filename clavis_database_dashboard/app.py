@@ -158,8 +158,84 @@ with overview:
     st.caption(" · ".join(f"{row.Resultado}: {row.Quantidade}" for row in validation_counts.itertuples(index=False)))
     st.caption("Validações contam combinações distintas de cenário, destinatário, tipo e resultado. Um cliente pode aparecer em mais de um resultado.")
 
+    stages = filtered[filtered["result_id"].notna()].drop_duplicates(
+        subset=["scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
+    ).copy()
+    failures = stages[stages["result_status"] == "failed"]
+    st.subheader("Falhas por tipo de validação")
+    if failures.empty:
+        st.info("Nenhuma falha encontrada nos filtros selecionados.")
+    else:
+        by_type = failures.groupby("validation_type", dropna=False).size().reset_index(name="Falhas")
+        by_type["validation_type"] = by_type["validation_type"].fillna("Não informado")
+        st.altair_chart(alt.Chart(by_type).mark_bar(color="#dc3545").encode(
+            y=alt.Y("validation_type:N", title="Tipo", sort="-x"),
+            x=alt.X("Falhas:Q", title="Falhas"), tooltip=["validation_type:N", "Falhas:Q"],
+        ), use_container_width=True)
+
+    st.subheader("Clientes com mais falhas")
+    client_failures = failures[(failures["scope_type"] == "client") & failures["client_id"].notna()]
+    if client_failures.empty:
+        st.info("Nenhuma falha de cliente encontrada nos filtros selecionados.")
+    else:
+        by_client = client_failures.groupby("client_id").size().nlargest(10).reset_index(name="Falhas")
+        st.altair_chart(alt.Chart(by_client).mark_bar(color="#dc3545").encode(
+            y=alt.Y("client_id:N", title="Cliente", sort="-x"),
+            x=alt.X("Falhas:Q", title="Falhas"), tooltip=["client_id:N", "Falhas:Q"],
+        ), use_container_width=True)
+        st.caption("Os 10 clientes com mais falhas no período filtrado.")
+
+    st.subheader("Evolução das falhas por dia")
+    daily_runs = filtered[["run_id", "started_at"]].drop_duplicates("run_id").copy()
+    daily_runs["Dia"] = pd.to_datetime(daily_runs["started_at"], utc=True).dt.tz_convert(display_zone).dt.date
+    daily = daily_runs.groupby("Dia").size().reset_index(name="Execuções")
+    daily_failures = failures.copy()
+    daily_failures["Dia"] = pd.to_datetime(daily_failures["started_at"], utc=True).dt.tz_convert(display_zone).dt.date
+    daily = daily.merge(daily_failures.groupby("Dia").size().reset_index(name="Falhas"), on="Dia", how="left")
+    daily["Falhas"] = daily["Falhas"].fillna(0).astype(int)
+    st.altair_chart(alt.Chart(daily).mark_line(point=True, color="#dc3545").encode(
+        x=alt.X("Dia:T", title="Dia"), y=alt.Y("Falhas:Q", title="Falhas"),
+        tooltip=["Dia:T", "Falhas:Q", "Execuções:Q"],
+    ), use_container_width=True)
+    st.caption("As execuções por dia aparecem ao passar o mouse; mais execuções podem resultar em mais falhas.")
+
+    st.subheader("Validações por cenário")
+    if stages.empty:
+        st.info("Nenhuma validação encontrada nos filtros selecionados.")
+    else:
+        by_scenario = stages.groupby(["title", "result_status"]).size().reset_index(name="Quantidade")
+        by_scenario["Resultado"] = by_scenario["result_status"].map(STATUS_LABELS).fillna("Não informado")
+        st.altair_chart(alt.Chart(by_scenario).mark_bar().encode(
+            y=alt.Y("title:N", title="Cenário", sort="-x"), x=alt.X("Quantidade:Q", title="Validações"),
+            color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"])),
+            tooltip=["title:N", "Resultado:N", "Quantidade:Q"],
+        ).properties(height=max(120, 30 * len(by_scenario["title"].unique()))), use_container_width=True)
+
+    st.subheader("Early × After")
+    if stages.empty:
+        st.info("Nenhuma validação encontrada nos filtros selecionados.")
+    else:
+        by_project = stages.groupby(["project", "result_status"]).size().reset_index(name="Quantidade")
+        by_project["Resultado"] = by_project["result_status"].map(STATUS_LABELS).fillna("Não informado")
+        st.altair_chart(alt.Chart(by_project).mark_bar().encode(
+            x=alt.X("project:N", title="Projeto"), xOffset="Resultado:N",
+            y=alt.Y("Quantidade:Q", title="Validações"),
+            color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"])),
+            tooltip=["project:N", "Resultado:N", "Quantidade:Q"],
+        ), use_container_width=True)
+
     st.subheader("Cenários")
     scenarios = scenario_summary(filtered).copy()
+    st.subheader("Duração média por cenário")
+    durations = scenarios.dropna(subset=["scenario_duration_ms"]).groupby("title", as_index=False)["scenario_duration_ms"].mean()
+    if durations.empty:
+        st.info("Nenhuma duração de cenário registrada nos filtros selecionados.")
+    else:
+        durations["Segundos"] = durations["scenario_duration_ms"] / 1000
+        st.altair_chart(alt.Chart(durations).mark_bar(color="#6f42c1").encode(
+            y=alt.Y("title:N", title="Cenário", sort="-x"), x=alt.X("Segundos:Q", title="Duração média (segundos)"),
+            tooltip=["title:N", alt.Tooltip("Segundos:Q", format=".2f")],
+        ).properties(height=max(120, 30 * len(durations))), use_container_width=True)
     scenarios["started_at"] = pd.to_datetime(scenarios["started_at"], utc=True).dt.tz_convert(display_zone).dt.strftime("%d/%m/%Y %H:%M:%S")
     scenarios["scenario_duration_ms"] = scenarios["scenario_duration_ms"].map(format_duration)
     scenarios["pytest_status"] = scenarios["pytest_status"].map(SCENARIO_LABELS).fillna("Não informado")
