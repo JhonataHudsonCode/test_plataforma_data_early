@@ -13,6 +13,10 @@ from src.database import DatabaseSettings, load_results
 
 
 st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
+st.markdown(
+    '<style>[data-testid="stAppDeployButton"] { display: none !important; }</style>',
+    unsafe_allow_html=True,
+)
 st.title("Dashboard de testes Clavis")
 st.caption("Resultados persistidos pelo Early e After no PostgreSQL")
 
