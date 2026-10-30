@@ -48,19 +48,29 @@ with st.sidebar:
             "Resultado da validação", ["failed", "passed", "info"],
             format_func=lambda value: STATUS_LABELS[value],
         )
-        submitted = st.form_submit_button("Pesquisar", type="primary")
+        button_area = st.empty()
+        submitted = button_area.form_submit_button("Pesquisar", type="primary")
+        search_error = False
+        if submitted and start_date <= end_date:
+            button_area.form_submit_button("⏳ Pesquisando...", type="primary", disabled=True)
+            start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
+            end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
+            with st.spinner("Consultando resultados..."):
+                try:
+                    data = load_results(settings, start, end)
+                except (psycopg.Error, OSError):
+                    search_error = True
+            if search_error:
+                st.session_state["dashboard_search_error"] = True
+                st.rerun()
     st.caption("As opções de projeto, cenário e cliente são carregadas após a primeira pesquisa. Ajuste os filtros e clique em Pesquisar para aplicá-los.")
+
+if st.session_state.pop("dashboard_search_error", False):
+    st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
 
 if submitted:
     if start_date > end_date:
         st.error("A data inicial deve ser anterior ou igual à data final.")
-        st.stop()
-    start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
-    end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
-    try:
-        data = load_results(settings, start, end)
-    except (psycopg.Error, OSError):
-        st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
         st.stop()
     st.session_state["dashboard_data"] = data
     st.session_state["dashboard_filters"] = {

@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+import psycopg
 from streamlit.testing.v1 import AppTest
 
 from src.database import COLUMNS
@@ -45,6 +46,12 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         assert query.call_count == 3
         app.selectbox[0].set_value("Mapping").run()
         assert query.call_count == 3
+        query.side_effect = [psycopg.OperationalError("falha simulada"), data]
+        app.button[0].click().run()
+        assert any("Não foi possível consultar" in error.value for error in app.error)
+        assert not app.button[0].disabled
+        app.button[0].click().run()
+        assert query.call_count == 5
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ["Visão geral", "Validações"]
     assert any(metric.label == "Validações com falha" and metric.value == "1" for metric in app.metric)
