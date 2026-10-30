@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
+import altair as alt
 import psycopg
 import streamlit as st
 
@@ -137,10 +138,21 @@ with overview:
     row[0].metric("Execuções", metrics["runs"])
     row[1].metric("Cenários executados", metrics["scenarios"])
     row[2].metric("Clientes identificados", metrics["clients"])
-    row = st.columns(3)
-    row[0].metric("Validações com falha", metrics["failed"])
-    row[1].metric("Validações aprovadas", metrics["passed"])
-    row[2].metric("Validações informativas", metrics["info"])
+    st.subheader("Resultado das validações")
+    validation_counts = pd.DataFrame({
+        "Resultado": ["Falhas", "Aprovadas", "Informativas"],
+        "Quantidade": [metrics["failed"], metrics["passed"], metrics["info"]],
+    })
+    chart = alt.Chart(validation_counts).encode(
+        x=alt.X("Resultado:N", sort=None, title=None),
+        y=alt.Y("Quantidade:Q", title="Quantidade", scale=alt.Scale(domainMin=0)),
+        color=alt.Color("Resultado:N", scale=alt.Scale(
+            domain=["Falhas", "Aprovadas", "Informativas"],
+            range=["#dc3545", "#198754", "#0d6efd"],
+        ), legend=None),
+        tooltip=["Resultado:N", "Quantidade:Q"],
+    )
+    st.altair_chart(chart.mark_bar() + chart.mark_text(dy=-8).encode(text="Quantidade:Q"), use_container_width=True)
     st.caption("Validações contam combinações distintas de cenário, destinatário, tipo e resultado. Um cliente pode aparecer em mais de um resultado.")
 
     st.subheader("Cenários")

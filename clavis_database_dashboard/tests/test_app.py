@@ -46,7 +46,7 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         app.multiselect[0].set_value(["after"]).run()
         assert query.call_count == 1
         app.multiselect[4].set_value(["passed"])
-        assert any(metric.label == "Validações com falha" for metric in app.metric)
+        assert any(item.value == "Resultado das validações" for item in app.subheader)
         app.button[1].click().run()
         assert query.call_count == 2
         assert any("Nenhum resultado corresponde" in warning.value for warning in app.warning)
@@ -68,6 +68,6 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         assert query.call_count == 5
     assert not app.exception
     assert [tab.label for tab in app.tabs] == ["Visão geral", "Validações"]
-    assert any(metric.label == "Validações com falha" and metric.value == "3" for metric in app.metric)
+    assert any(item.value == "Resultado das validações" for item in app.subheader)
     assert any(expander.label == "cliente-a" for expander in app.expander)
     assert any("campo ausente" in markdown.value for markdown in app.markdown)
