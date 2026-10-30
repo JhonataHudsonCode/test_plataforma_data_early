@@ -34,14 +34,45 @@ def choices(column: str) -> list[str]:
     return sorted(data[column].dropna().astype(str).unique().tolist(), key=str.casefold)
 
 
+def close_scenario_dialog() -> None:
+    st.session_state["scenario_dialog_open"] = False
+
+
+@st.dialog("Selecionar cenários", width="large", on_dismiss=close_scenario_dialog)
+def select_scenarios() -> None:
+    scenarios = choices("title")
+    search = st.text_input("Buscar cenário", placeholder="Digite parte do nome")
+    selected = set(st.session_state.get("selected_scenarios", []))
+    matching = [name for name in scenarios if search.casefold() in name.casefold()]
+    if not matching:
+        st.info("Nenhum cenário encontrado.")
+    with st.form("scenario_selection"):
+        for name in matching:
+            checked = st.checkbox(name, value=name in selected, key=f"scenario_option_{name}")
+            if checked:
+                selected.add(name)
+            else:
+                selected.discard(name)
+        if st.form_submit_button("Confirmar seleção", type="primary"):
+            st.session_state["selected_scenarios"] = sorted(selected, key=str.casefold)
+            close_scenario_dialog()
+            st.rerun()
+
+
 with st.sidebar:
     st.header("Filtros")
-    with st.form("search_filters"):
+    with st.container():
         start_date = st.date_input("Data inicial", value=today - timedelta(days=30))
         end_date = st.date_input("Data final", value=today)
         projects = st.multiselect("Projeto", choices("project"))
         environments = st.multiselect("Ambiente", choices("environment"))
-        test_names = st.multiselect("Cenário", choices("title"))
+        st.markdown("**Cenário**")
+        if st.button("Selecionar cenários", disabled=not choices("title"), use_container_width=True):
+            st.session_state["scenario_dialog_open"] = True
+        if st.session_state.get("scenario_dialog_open", False):
+            select_scenarios()
+        test_names = st.session_state.get("selected_scenarios", [])
+        st.caption(f"{len(test_names)} cenário(s) selecionado(s)" if test_names else "Todos os cenários")
         client_ids = st.multiselect("Cliente", choices("client_id"))
         validation_types = st.multiselect("Tipo de validação", choices("validation_type"))
         statuses = st.multiselect(
@@ -49,10 +80,10 @@ with st.sidebar:
             format_func=lambda value: STATUS_LABELS[value],
         )
         button_area = st.empty()
-        submitted = button_area.form_submit_button("Pesquisar", type="primary")
+        submitted = button_area.button("Pesquisar", type="primary")
         search_error = False
         if submitted and start_date <= end_date:
-            button_area.form_submit_button("⏳ Pesquisando...", type="primary", disabled=True)
+            button_area.button("⏳ Pesquisando...", type="primary", disabled=True)
             start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
             end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
             with st.spinner("Consultando resultados..."):
@@ -131,8 +162,8 @@ with validations:
         if not categories:
             st.info("Nenhum tipo de validação foi registrado para os filtros selecionados.")
         else:
-            category = st.selectbox("Tipo de validação", categories)
-            category_data = messages[messages["validation_type"] == category]
+            category = st.selectbox("Tipo de validação", ["Todas as validações", *categories])
+            category_data = messages if category == "Todas as validações" else messages[messages["validation_type"] == category]
             options = category_data.drop_duplicates("scenario_id").set_index("scenario_id")
 
             def scenario_label(scenario_id):
@@ -152,4 +183,6 @@ with validations:
                 for scope, scope_data in status_data.groupby("scope_label", sort=True, dropna=False):
                     with st.expander(str(scope) if pd.notna(scope) else "Não informado"):
                         for _, message in scope_data.sort_values("sequence").iterrows():
-                            st.write(message["message"])
+                            validation_type = message["validation_type"]
+                            label = str(validation_type) if pd.notna(validation_type) else "Não informado"
+                            st.write(f"[{label}] {message['message']}")
