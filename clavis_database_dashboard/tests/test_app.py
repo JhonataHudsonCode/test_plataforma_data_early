@@ -71,7 +71,8 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
     assert any(item.value == "Resultado das validações" for item in app.subheader)
     headings = {item.value for item in app.subheader}
     assert {"Falhas por tipo de validação", "Clientes com mais falhas", "Evolução das falhas por dia",
-            "Validações por cenário", "Early × After"} <= headings
+            "Validações por cenário"} <= headings
+    assert "Early × After" not in headings
     assert "Duração média por cenário" not in headings
     assert any(expander.label == "cliente-a" for expander in app.expander)
     assert any("campo ausente" in markdown.value for markdown in app.markdown)

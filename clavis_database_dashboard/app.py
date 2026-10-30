@@ -194,8 +194,8 @@ with overview:
     daily_failures["Dia"] = pd.to_datetime(daily_failures["started_at"], utc=True).dt.tz_convert(display_zone).dt.date
     daily = daily.merge(daily_failures.groupby("Dia").size().reset_index(name="Falhas"), on="Dia", how="left")
     daily["Falhas"] = daily["Falhas"].fillna(0).astype(int)
-    st.altair_chart(alt.Chart(daily).mark_bar(color="#dc3545").encode(
-        x=alt.X("Dia:O", title="Dia"), y=alt.Y("Falhas:Q", title="Falhas"),
+    st.altair_chart(alt.Chart(daily).mark_line(point=True, color="#dc3545").encode(
+        x=alt.X("Dia:T", title="Dia"), y=alt.Y("Falhas:Q", title="Falhas"),
         tooltip=["Dia:T", "Falhas:Q", "Execuções:Q"],
     ), use_container_width=True)
     st.caption("As execuções por dia aparecem ao passar o mouse; mais execuções podem resultar em mais falhas.")
@@ -210,19 +210,6 @@ with overview:
             x=alt.X("title:N", title="Cenário", sort="-y", axis=alt.Axis(labelAngle=-45)), y=alt.Y("Quantidade:Q", title="Validações"),
             color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"])),
             tooltip=["title:N", "Resultado:N", "Quantidade:Q"],
-        ), use_container_width=True)
-
-    st.subheader("Early × After")
-    if stages.empty:
-        st.info("Nenhuma validação encontrada nos filtros selecionados.")
-    else:
-        by_project = stages.groupby(["project", "result_status"]).size().reset_index(name="Quantidade")
-        by_project["Resultado"] = by_project["result_status"].map(STATUS_LABELS).fillna("Não informado")
-        st.altair_chart(alt.Chart(by_project).mark_bar().encode(
-            x=alt.X("project:N", title="Projeto"), xOffset="Resultado:N",
-            y=alt.Y("Quantidade:Q", title="Validações"),
-            color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"])),
-            tooltip=["project:N", "Resultado:N", "Quantidade:Q"],
         ), use_container_width=True)
 
     st.subheader("Cenários")
