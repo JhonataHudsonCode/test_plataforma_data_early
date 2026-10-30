@@ -143,16 +143,19 @@ with overview:
         "Resultado": ["Falhas", "Aprovadas", "Informativas"],
         "Quantidade": [metrics["failed"], metrics["passed"], metrics["info"]],
     })
-    chart = alt.Chart(validation_counts).encode(
-        x=alt.X("Resultado:N", sort=None, title=None),
-        y=alt.Y("Quantidade:Q", title="Quantidade", scale=alt.Scale(domainMin=0)),
+    chart = alt.Chart(validation_counts).mark_arc(innerRadius=70, outerRadius=120).encode(
+        theta=alt.Theta("Quantidade:Q"),
         color=alt.Color("Resultado:N", scale=alt.Scale(
             domain=["Falhas", "Aprovadas", "Informativas"],
             range=["#dc3545", "#198754", "#0d6efd"],
-        ), legend=None),
+        ), legend=alt.Legend(title="Resultado")),
         tooltip=["Resultado:N", "Quantidade:Q"],
     )
-    st.altair_chart(chart.mark_bar() + chart.mark_text(dy=-8).encode(text="Quantidade:Q"), use_container_width=True)
+    if validation_counts["Quantidade"].sum() == 0:
+        st.info("Nenhuma validação registrada para os filtros selecionados.")
+    else:
+        st.altair_chart(chart, use_container_width=True)
+    st.caption(" · ".join(f"{row.Resultado}: {row.Quantidade}" for row in validation_counts.itertuples(index=False)))
     st.caption("Validações contam combinações distintas de cenário, destinatário, tipo e resultado. Um cliente pode aparecer em mais de um resultado.")
 
     st.subheader("Cenários")
