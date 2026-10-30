@@ -25,20 +25,53 @@ except (ValueError, ZoneInfoNotFoundError) as error:
     st.stop()
 
 today = datetime.now(display_zone).date()
+data = st.session_state.get("dashboard_data")
+
+
+def choices(column: str) -> list[str]:
+    if data is None or data.empty:
+        return []
+    return sorted(data[column].dropna().astype(str).unique().tolist(), key=str.casefold)
+
+
 with st.sidebar:
     st.header("Filtros")
-    start_date = st.date_input("Data inicial", value=today - timedelta(days=30))
-    end_date = st.date_input("Data final", value=today)
+    with st.form("search_filters"):
+        start_date = st.date_input("Data inicial", value=today - timedelta(days=30))
+        end_date = st.date_input("Data final", value=today)
+        projects = st.multiselect("Projeto", choices("project"))
+        environments = st.multiselect("Ambiente", choices("environment"))
+        test_names = st.multiselect("Cenário", choices("title"))
+        client_ids = st.multiselect("Cliente", choices("client_id"))
+        validation_types = st.multiselect("Tipo de validação", choices("validation_type"))
+        statuses = st.multiselect(
+            "Resultado da validação", ["failed", "passed", "info"],
+            format_func=lambda value: STATUS_LABELS[value],
+        )
+        submitted = st.form_submit_button("Pesquisar", type="primary")
+    st.caption("As opções de projeto, cenário e cliente são carregadas após a primeira pesquisa. Ajuste os filtros e clique em Pesquisar para aplicá-los.")
+
+if submitted:
     if start_date > end_date:
         st.error("A data inicial deve ser anterior ou igual à data final.")
         st.stop()
+    start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
+    end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
+    try:
+        data = load_results(settings, start, end)
+    except (psycopg.Error, OSError):
+        st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
+        st.stop()
+    st.session_state["dashboard_data"] = data
+    st.session_state["dashboard_filters"] = {
+        "project": projects, "environment": environments, "title": test_names,
+        "client_id": client_ids, "validation_type": validation_types, "result_status": statuses,
+    }
+    # Recria os widgets com as opções retornadas pela pesquisa recém-concluída.
+    st.rerun()
 
-start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
-end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
-try:
-    data = load_results(settings, start, end)
-except (psycopg.Error, OSError):
-    st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
+if data is None:
+    st.info("Selecione o período e clique em Pesquisar para consultar os resultados.")
     st.stop()
 
 if data.empty:
@@ -46,26 +79,7 @@ if data.empty:
     st.stop()
 
 
-def choices(column: str) -> list[str]:
-    return sorted(data[column].dropna().astype(str).unique().tolist(), key=str.casefold)
-
-
-with st.sidebar:
-    projects = st.multiselect("Projeto", choices("project"))
-    environments = st.multiselect("Ambiente", choices("environment"))
-    test_names = st.multiselect("Cenário", choices("title"))
-    client_ids = st.multiselect("Cliente", choices("client_id"))
-    validation_types = st.multiselect("Tipo de validação", choices("validation_type"))
-    statuses = st.multiselect(
-        "Resultado da validação", ["failed", "passed", "info"],
-        format_func=lambda value: STATUS_LABELS[value],
-    )
-    st.caption("Deixe um filtro vazio para incluir todas as opções. Os filtros de cliente, validação e resultado limitam os dados exibidos.")
-
-filtered = apply_filters(data, {
-    "project": projects, "environment": environments, "title": test_names,
-    "client_id": client_ids, "validation_type": validation_types, "result_status": statuses,
-})
+filtered = apply_filters(data, st.session_state["dashboard_filters"])
 if filtered.empty:
     st.warning("Nenhum resultado corresponde aos filtros selecionados.")
     st.stop()
