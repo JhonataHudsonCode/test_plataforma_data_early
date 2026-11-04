@@ -173,7 +173,7 @@ def persist_session_reports(session, exitstatus: int, project: str, report_paths
                 ]
                 if rows:
                     cursor.executemany(
-                        sql.SQL("INSERT INTO {} (scenario_id, scope_type, client_id, scope_label, validation_type, status, message, raw_message, sequence, index_name, index_type, attribute_name, previous_value, current_value, variation_percent, comparison_direction, comparison_limit_percent, max_increase_percent, max_decrease_percent, previous_date, current_date, reason_code) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)").format(table("qa_test_results")),
+                        sql.SQL('INSERT INTO {} (scenario_id, scope_type, client_id, scope_label, validation_type, status, message, raw_message, sequence, index_name, index_type, attribute_name, previous_value, current_value, variation_percent, comparison_direction, comparison_limit_percent, max_increase_percent, max_decrease_percent, previous_date, comparison_current_date, reason_code) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)').format(table("qa_test_results")),
                         rows,
                     )
     logger.info("Resultados da execução %s gravados no PostgreSQL (%s).", run_id, project)

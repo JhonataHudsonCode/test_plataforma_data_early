@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS qa_reports.qa_test_results (
     max_increase_percent numeric,
     max_decrease_percent numeric,
     previous_date date,
-    current_date date,
+    comparison_current_date date,
     reason_code text,
     UNIQUE (scenario_id, sequence)
 );

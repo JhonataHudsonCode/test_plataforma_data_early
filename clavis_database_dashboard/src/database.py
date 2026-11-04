@@ -77,7 +77,7 @@ def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> 
                v.sequence, v.recorded_at, v.index_name, v.index_type, v.attribute_name,
                v.previous_value, v.current_value, v.variation_percent, v.comparison_direction,
                v.comparison_limit_percent, v.max_increase_percent, v.max_decrease_percent,
-               v.previous_date, v.current_date, v.reason_code
+               v.previous_date, v.comparison_current_date AS "current_date", v.reason_code
         FROM {runs} AS r
         LEFT JOIN {scenarios} AS s ON s.run_id = r.id
         LEFT JOIN {results} AS v ON v.scenario_id = s.id

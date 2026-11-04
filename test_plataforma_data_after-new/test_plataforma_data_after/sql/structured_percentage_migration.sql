@@ -14,7 +14,7 @@ ALTER TABLE qa_reports.qa_test_results
     ADD COLUMN IF NOT EXISTS max_increase_percent numeric,
     ADD COLUMN IF NOT EXISTS max_decrease_percent numeric,
     ADD COLUMN IF NOT EXISTS previous_date date,
-    ADD COLUMN IF NOT EXISTS current_date date,
+    ADD COLUMN IF NOT EXISTS comparison_current_date date,
     ADD COLUMN IF NOT EXISTS reason_code text;
 
 COMMIT;
