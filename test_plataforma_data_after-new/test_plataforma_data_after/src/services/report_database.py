@@ -98,6 +98,52 @@ def _oto_report_metadata(result: dict) -> dict:
     }
 
 
+def _percentage_totals_report_metadata(result: dict) -> dict:
+    """Recupera totais numéricos explícitos de comparações sem metadados."""
+    if result.get("validation_type", "").casefold() != "comparação percentual":
+        return {}
+    message = result.get("message")
+    if not isinstance(message, str):
+        return {}
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    pattern = r"índice(?:\s+(?:de\s+produto|de\s+ativos|histórico))?\s+'([^']+)'\s*\|\s*total\s+de\s+([\w.\-]+)"
+    match = re.search(pattern, message, re.IGNORECASE)
+    if not match:
+        return {}
+    paired = re.search(r"ontem\s*=\s*(" + number + r")\s*,\s*hoje\s*=\s*(" + number + r")", message, re.IGNORECASE)
+    from_to = re.search(r"(?:aumentou|reduziu|variou)\s+de\s+(" + number + r")\s+para\s+(" + number + r")", message, re.IGNORECASE)
+    zero = re.search(r"sem\s+variação\s*\(\s*0(?:\.0+)?\s+para\s+0(?:\.0+)?\s*\)", message, re.IGNORECASE)
+    values = paired or from_to
+    if not values and not zero:
+        return {}
+    try:
+        previous, current = (Decimal(values.group(1)), Decimal(values.group(2))) if values else (Decimal(0), Decimal(0))
+        if not previous.is_finite() or not current.is_finite():
+            return {}
+    except InvalidOperation:
+        return {}
+    name, attribute = match.groups()
+    client = result.get("client_id") or ""
+    prefix = f"{client}_" if client else ""
+    family = name[len(prefix):] if prefix and name.casefold().startswith(prefix.casefold()) else name
+    direction = "increase" if current > previous else "decrease" if current < previous else "unchanged"
+    limit_match = re.search(r"(?:limite|máximo)\s+(?:permitido|de)\s*:?\s*(" + number + r")\s*%", message, re.IGNORECASE)
+    historical_asset = family.casefold() in {"asset-historical-observability", "asset-historical-software"}
+    limit = Decimal(limit_match.group(1)) if limit_match else Decimal(50) if historical_asset else None
+    reason = None
+    if result.get("status") == "failed":
+        reason = "INVALID_VALUE" if previous < 0 or current < 0 else "PERCENTAGE_BASE_ZERO" if previous == 0 and current else "PERCENTAGE_LIMIT_EXCEEDED" if limit is not None else None
+    return {
+        "index_name": name, "index_type": family, "attribute_name": attribute,
+        "previous_value": previous, "current_value": current,
+        "variation_percent": (current - previous) / abs(previous) * 100 if previous else None,
+        "comparison_direction": direction, "comparison_limit_percent": limit if direction != "unchanged" else None,
+        "max_increase_percent": limit if historical_asset or direction == "increase" else None,
+        "max_decrease_percent": limit if not historical_asset and direction == "decrease" else None,
+        "previous_date": None, "current_date": None, "reason_code": reason,
+    }
+
+
 def parse_report(content: str) -> dict:
     """Lê o TXT individual, preservando todas as mensagens de cada seção."""
     lines = content.splitlines()
@@ -212,6 +258,8 @@ def persist_session_reports(session, exitstatus: int, project: str, report_paths
                     structured = report.get("structured", {}).get(str(sequence))
                     if not structured and name == "test_should_validate_oto_dashboard_after_pipeline":
                         structured = _oto_report_metadata(result)
+                    if not structured:
+                        structured = _percentage_totals_report_metadata(result)
                     structured = structured or {}
                     rows.append((scenario_id, result["scope_type"], result["client_id"], result["scope_label"],
                                  result["validation_type"], result["status"], result["message"], result["raw_message"], sequence,

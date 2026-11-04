@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.services.client_validation_report import ClientValidationReport
-from src.services.report_database import _oto_report_metadata, parse_report, persist_session_reports
+from src.services.report_database import _percentage_totals_report_metadata, _oto_report_metadata, parse_report, persist_session_reports
 from src.validators.after_pipeline.product_data_validator import ProductDataValidator, _CategorizedMessages
 from src.validators.after_pipeline.historical_vulnerability_validator import HistoricalVulnerabilityValidator
 from src.validators.after_pipeline.oto_dashboard.asset_data_validator import OtoAssetDataValidator
@@ -173,3 +173,57 @@ def test_oto_fallback_recovers_explicit_pair_when_sidecar_is_empty(tmp_path, mon
 def test_oto_fallback_rejects_non_comparison_messages():
     assert _oto_report_metadata({"message": "Índice 'acme_oto_dashboard' | seção **asset_data** ausente.", "status": "failed"}) == {}
     assert _oto_report_metadata({"message": "Índice 'acme_oto_dashboard' | atributo **score**: current=1, past=2", "status": "passed"}) == {}
+
+
+def test_historical_asset_fallback_recovers_two_indexes_without_guessing_dates(tmp_path, monkeypatch):
+    path = tmp_path / "test_should_validate_assets_observability_software_variation_after_pipeline.txt"
+    path.write_text("Teste: Históricos\nBDD:\nDado\nFalhas (1):\n- Cliente: acme\n"
+        "  [Comparação percentual] Índice 'acme_asset-historical-observability' | total de assets.monitored_vulns aumentou 60% (ontem=10.0, hoje=16.0); máximo permitido: 50%.\n"
+        "  [Comparação percentual] Índice 'acme_asset-historical-software' | total de assets_total aumentou de 0 para 9.0; excede o limite de 50%.\n"
+        "Aprovados (1):\n- Cliente: acme\n"
+        "  [Comparação percentual] Índice 'acme_asset-historical-software' | total de assets_with_unauthorized_softwares: sem variação (0 para 0).\n", encoding="utf-8")
+    path.with_suffix(".structured.json").write_text("{}", encoding="utf-8")
+    for key, value in {"REPORT_DB_ENABLED": "true", "REPORT_DB_HOST": "db", "REPORT_DB_DATABASE": "qa", "REPORT_DB_USER": "u", "REPORT_DB_PASSWORD": "p"}.items():
+        monkeypatch.setenv(key, value)
+    config = SimpleNamespace(_report_db_outcomes={}, getoption=lambda *args, **kwargs: False)
+    session = SimpleNamespace(config=config, _validation_started_at=0, _report_db_started_at=datetime.now(timezone.utc))
+    connection = MagicMock()
+    cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = (123,)
+    with patch("src.services.report_database.psycopg.connect", return_value=connection):
+        persist_session_reports(session, 1, "after", [path])
+    rows = cursor.executemany.call_args.args[1]
+    assert rows[0][9:15] == ("acme_asset-historical-observability", "asset-historical-observability", "assets.monitored_vulns", 10, 16, 60)
+    assert rows[1][9:15] == ("acme_asset-historical-software", "asset-historical-software", "assets_total", 0, 9, None)
+    assert rows[1][21] == "PERCENTAGE_BASE_ZERO"
+    assert rows[2][12:15] == (0, 0, None)
+    assert all(row[19] is None and row[20] is None for row in rows)
+
+
+def test_totals_fallback_rejects_unrecognized_values_and_supports_other_indexes():
+    base = {"validation_type": "Comparação percentual", "status": "failed", "client_id": "acme"}
+    assert _percentage_totals_report_metadata({**base, "message": "Índice 'acme_asset-historical-software' | total de assets_total deve ser numérico."}) == {}
+    assert _percentage_totals_report_metadata({**base, "message": "Índice 'acme_asset' | total de assets_total aumentou 60% (ontem=10, hoje=16)."})["variation_percent"] == 60
+
+
+def test_both_asset_history_validations_produce_structured_messages(tmp_path):
+    repository, cognito = MagicMock(), MagicMock()
+    cognito.get_client.return_value = {"has_asset": True}
+    observability = {"assets": {"monitored_vulns": 10, "monitored_events": 10}}
+    software = {"assets_total": 10, "assets_missing_mandatory_softwares": 10, "assets_with_unauthorized_softwares": 10}
+    repository.get_documents_between.side_effect = [
+        [{"_source": observability}], [{"_source": observability}],
+        [{"_source": software}], [{"_source": software}],
+    ]
+    validator = ProductDataValidator(repository, cognito, date(2026, 11, 4))
+    validator._validate_mapping = MagicMock()
+    errors, details = validator.validate_assets(ClientTarget("acme"))
+    report = ClientValidationReport()
+    report.add_client_result("acme", failures=errors, details=details)
+    path = tmp_path / "test_assets.txt"
+    report.write(path, "Históricos", "BDD")
+    metadata = json.loads(path.with_suffix(".structured.json").read_text(encoding="utf-8"))
+    assert {item["index_type"] for item in metadata.values()} == {"asset-historical-observability", "asset-historical-software"}
+    assert {item["attribute_name"] for item in metadata.values()} == {
+        "assets.monitored_vulns", "assets.monitored_events", "assets_total",
+        "assets_missing_mandatory_softwares", "assets_with_unauthorized_softwares"}
