@@ -1,6 +1,8 @@
+from zoneinfo import ZoneInfo
+
 import pandas as pd
 
-from src.analysis import apply_filters, format_duration, scenario_summary, summarize
+from src.analysis import apply_filters, empty_index_date_details, format_duration, index_results, missing_index_details, scenario_summary, summarize
 
 
 def sample():
@@ -23,6 +25,58 @@ def test_filters_allow_same_client_in_failed_and_passed_categories():
     assert filtered.iloc[0]["validation_type"] == "Timestamp"
 
 
+def test_scenarios_and_clients_are_distinct_across_runs_and_projects():
+    first = sample().iloc[0].to_dict()
+    repeated = {**first, "run_id": "r2", "scenario_id": 3, "result_id": 4, "started_at": "2026-10-28"}
+    another_project = {**repeated, "scenario_id": 4, "result_id": 5, "project": "after"}
+    another_client = {**repeated, "result_id": 6, "client_id": "b", "scope_label": "b"}
+    result = summarize(pd.DataFrame([first, repeated, another_project, another_client]))
+    assert result["runs"] == 2
+    assert result["scenarios"] == 2
+    assert result["clients"] == 2
+
+
 def test_duration_and_missing_values():
     assert format_duration(61500) == "00:01:01.50"
     assert format_duration(None) == "Não informada"
+
+
+def test_missing_indexes_count_only_explicit_failures_once_per_client():
+    base = sample().iloc[0].to_dict()
+    records = [
+        {**base, "message": "Índice 'cliente_asset' não encontrado."},
+        {**base, "run_id": "r2", "scenario_id": 4, "message": "Índice 'cliente_asset' não encontrado."},
+        {**base, "message": "Índice 'cliente_asset' não retornou documentos com @timestamp em 2026-10-27."},
+        {**base, "result_status": "passed", "message": "Índice 'outro' não encontrado."},
+        {**base, "scope_label": "b", "message": "Índice 'cliente_asset' não encontrado."},
+    ]
+    assert len(missing_index_details(pd.DataFrame(records))) == 2
+
+
+def test_empty_index_dates_use_each_execution_and_ignore_unrelated_failures():
+    base = {**sample().iloc[0].to_dict(), "started_at": "2026-10-28T15:00:00Z"}
+    frame = pd.DataFrame([
+        {**base, "message": "Índice 'asset' não retornou documentos com date em 2026-10-28."},
+        {**base, "message": "Índice 'asset' não retornou documentos com date em 2026-10-27."},
+        {**base, "message": "Índice 'asset' não retornou documentos com date em 2026-10-27."},
+        {**base, "result_status": "passed", "message": "Índice 'other' | consulta retornou 0 documento(s) em 2026-10-28 e 3 em 2026-10-27."},
+        {**base, "result_status": "passed", "message": "Índice 'other' | consulta retornou 2 documento(s) em 2026-10-28 e 0 em 2026-10-27."},
+        {**base, "message": "Índice 'ignored' não retornou documentos com date em 2026-10-20."},
+        {**base, "message": "Índice 'failed_query' | erro ao consultar documentos em 2026-10-28."},
+    ])
+    result = empty_index_date_details(frame, ZoneInfo("America/Sao_Paulo"))
+    assert set(zip(result["index_name"], result["date_role"])) == {("asset", "Hoje"), ("asset", "Ontem"), ("other", "Hoje"), ("other", "Ontem")}
+
+
+def test_index_view_groups_client_prefix_and_preserves_distinct_results():
+    base = sample().iloc[0].to_dict()
+    frame = pd.DataFrame([
+        {**base, "client_id": "a", "message": "Índice 'a_asset' não encontrado."},
+        {**base, "client_id": "b", "scope_label": "b", "result_status": "passed", "message": "Índice 'b_asset' encontrado."},
+        {**base, "message": "Falha sem nome do índice."},
+        {**base, "message": "Índice não encontrado."},
+    ])
+    selected = index_results(frame)
+    assert list(selected["index_family"]) == ["asset", "asset"]
+    assert set(selected["result_status"]) == {"passed", "failed"}
+    assert set(selected["client_id"]) == {"a", "b"}

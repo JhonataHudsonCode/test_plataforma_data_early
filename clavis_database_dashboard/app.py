@@ -9,7 +9,7 @@ import altair as alt
 import psycopg
 import streamlit as st
 
-from src.analysis import SCENARIO_LABELS, STATUS_LABELS, apply_filters, format_duration, scenario_summary, summarize
+from src.analysis import SCENARIO_LABELS, STATUS_LABELS, apply_filters, empty_index_date_details, format_duration, index_results, missing_index_details, scenario_summary, summarize
 from src.database import DatabaseSettings, load_results
 
 
@@ -136,8 +136,29 @@ with overview:
     metrics = summarize(filtered)
     row = st.columns(3)
     row[0].metric("Execuções", metrics["runs"])
-    row[1].metric("Cenários executados", metrics["scenarios"])
-    row[2].metric("Clientes identificados", metrics["clients"])
+    row[1].metric("Cenários distintos", metrics["scenarios"])
+    row[2].metric("Clientes distintos", metrics["clients"])
+    st.caption("Cenários são contados por projeto e nome do teste; clientes, pelo identificador, sem duplicação entre execuções.")
+    missing_indexes = missing_index_details(filtered)
+    empty_dates = empty_index_date_details(filtered, display_zone)
+    missing_column, empty_column = st.columns(2)
+    missing_column.metric("Índices não encontrados", len(missing_indexes))
+    empty_column.metric("Índices sem documentos na data", len(empty_dates.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])))
+    empty_column.caption(f"Hoje: {(empty_dates['date_role'] == 'Hoje').sum()} · Ontem: {(empty_dates['date_role'] == 'Ontem').sum()}")
+    if not missing_indexes.empty:
+        with st.expander("Ver índices não encontrados"):
+            st.dataframe(missing_indexes[["project", "environment", "scope_label", "index_name", "message"]].rename(columns={
+                "project": "Projeto", "environment": "Ambiente", "scope_label": "Cliente ou origem",
+                "index_name": "Índice", "message": "Detalhe",
+            }), hide_index=True, use_container_width=True)
+    st.caption("Índices explicitamente reportados como não encontrados, sem repetição por projeto, ambiente e cliente ou origem.")
+    if not empty_dates.empty:
+        with st.expander("Ver índices sem documentos por data"):
+            st.dataframe(empty_dates[["project", "environment", "scope_label", "index_name", "date_role", "document_date", "message"]].rename(columns={
+                "project": "Projeto", "environment": "Ambiente", "scope_label": "Cliente ou origem",
+                "index_name": "Índice", "date_role": "Data da consulta", "document_date": "Data", "message": "Detalhe",
+            }), hide_index=True, use_container_width=True)
+    st.caption("Hoje e ontem referem-se à data de cada execução. Os totais são distintos por índice, projeto, ambiente e cliente ou origem; um índice pode aparecer nas duas datas. A identificação depende das mensagens registradas pelos testes.")
     stages = filtered[filtered["result_id"].notna()].drop_duplicates(
         subset=["scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
     ).copy()
@@ -225,37 +246,59 @@ with overview:
     st.dataframe(scenarios, hide_index=True, use_container_width=True)
 
 with validations:
-    st.subheader("Resultados por tipo de validação")
-    messages = filtered[filtered["result_id"].notna()]
-    if messages.empty:
-        st.info("Os cenários selecionados não possuem mensagens de validação registradas.")
-    else:
-        st.caption("Selecione o tipo e o cenário; em seguida, expanda o cliente para ver os detalhes.")
-        categories = sorted(messages["validation_type"].dropna().unique().tolist(), key=str.casefold)
-        if not categories:
-            st.info("Nenhum tipo de validação foi registrado para os filtros selecionados.")
+    view = st.radio("Visualização", ["Por cenário", "Por índice"], horizontal=True)
+    if view == "Por índice":
+        indexed = index_results(filtered)
+        st.subheader("Resultados por índice")
+        st.caption("O tipo de índice é identificado nas mensagens; o prefixo do cliente é removido quando corresponde ao seu identificador. Os filtros da barra lateral continuam aplicados.")
+        if indexed.empty:
+            st.info("Nenhum índice identificado nas mensagens dos resultados selecionados.")
         else:
-            category = st.selectbox("Tipo de validação", ["Todas as validações", *categories])
-            category_data = messages if category == "Todas as validações" else messages[messages["validation_type"] == category]
-            options = category_data.drop_duplicates("scenario_id").set_index("scenario_id")
-
-            def scenario_label(scenario_id):
-                item = options.loc[scenario_id]
-                started = pd.to_datetime(item["started_at"], utc=True).tz_convert(display_zone).strftime("%d/%m/%Y %H:%M")
-                return f"{item['title']} · {item['project']} / {item['environment']} · {started} · #{scenario_id}"
-
-            selected_id = st.selectbox("Cenário", options.index.tolist(), format_func=scenario_label)
-            scenario_data = category_data[category_data["scenario_id"] == selected_id]
-            first = scenario_data.iloc[0]
-            st.caption(f"Duração: {format_duration(first['scenario_duration_ms'])} · Execução: {first['run_id']}")
+            families = sorted(indexed["index_family"].unique(), key=str.casefold)
+            index_name = st.selectbox("Índice", families)
+            selected = indexed[indexed["index_family"] == index_name]
             for status in ("failed", "passed", "info"):
-                status_data = scenario_data[scenario_data["result_status"] == status]
+                status_data = selected[selected["result_status"] == status]
                 if status_data.empty:
                     continue
                 st.markdown(f"**{STATUS_LABELS[status]}** · {status_data['scope_label'].nunique()} destinatário(s)")
                 for scope, scope_data in status_data.groupby("scope_label", sort=True, dropna=False):
                     with st.expander(str(scope) if pd.notna(scope) else "Não informado"):
-                        for _, message in scope_data.sort_values("sequence").iterrows():
-                            validation_type = message["validation_type"]
-                            label = str(validation_type) if pd.notna(validation_type) else "Não informado"
-                            st.write(f"[{label}] {message['message']}")
+                        for _, item in scope_data.sort_values(["started_at", "sequence"], ascending=[False, True]).iterrows():
+                            started = pd.to_datetime(item["started_at"], utc=True).tz_convert(display_zone).strftime("%d/%m/%Y %H:%M")
+                            st.write(f"{started} · {item['title']} · {item['index_name']} · [{item['validation_type']}] {item['message']}")
+    else:
+        st.subheader("Resultados por tipo de validação")
+        messages = filtered[filtered["result_id"].notna()]
+        if messages.empty:
+            st.info("Os cenários selecionados não possuem mensagens de validação registradas.")
+        else:
+            st.caption("Selecione o tipo e o cenário; em seguida, expanda o cliente para ver os detalhes.")
+            categories = sorted(messages["validation_type"].dropna().unique().tolist(), key=str.casefold)
+            if not categories:
+                st.info("Nenhum tipo de validação foi registrado para os filtros selecionados.")
+            else:
+                category = st.selectbox("Tipo de validação", ["Todas as validações", *categories])
+                category_data = messages if category == "Todas as validações" else messages[messages["validation_type"] == category]
+                options = category_data.drop_duplicates("scenario_id").set_index("scenario_id")
+
+                def scenario_label(scenario_id):
+                    item = options.loc[scenario_id]
+                    started = pd.to_datetime(item["started_at"], utc=True).tz_convert(display_zone).strftime("%d/%m/%Y %H:%M")
+                    return f"{item['title']} · {item['project']} / {item['environment']} · {started} · #{scenario_id}"
+
+                selected_id = st.selectbox("Cenário", options.index.tolist(), format_func=scenario_label)
+                scenario_data = category_data[category_data["scenario_id"] == selected_id]
+                first = scenario_data.iloc[0]
+                st.caption(f"Duração: {format_duration(first['scenario_duration_ms'])} · Execução: {first['run_id']}")
+                for status in ("failed", "passed", "info"):
+                    status_data = scenario_data[scenario_data["result_status"] == status]
+                    if status_data.empty:
+                        continue
+                    st.markdown(f"**{STATUS_LABELS[status]}** · {status_data['scope_label'].nunique()} destinatário(s)")
+                    for scope, scope_data in status_data.groupby("scope_label", sort=True, dropna=False):
+                        with st.expander(str(scope) if pd.notna(scope) else "Não informado"):
+                            for _, message in scope_data.sort_values("sequence").iterrows():
+                                validation_type = message["validation_type"]
+                                label = str(validation_type) if pd.notna(validation_type) else "Não informado"
+                                st.write(f"[{label}] {message['message']}")

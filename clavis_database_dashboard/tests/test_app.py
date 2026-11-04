@@ -76,3 +76,21 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
     assert "Duração média por cenário" not in headings
     assert any(expander.label == "cliente-a" for expander in app.expander)
     assert any("campo ausente" in markdown.value for markdown in app.markdown)
+
+
+def test_index_view_displays_failures_and_successes_for_all_clients(monkeypatch):
+    for key, value in {"REPORT_DB_HOST": "localhost", "REPORT_DB_DATABASE": "reports", "REPORT_DB_USER": "reader", "REPORT_DB_PASSWORD": "fake"}.items():
+        monkeypatch.setenv(key, value)
+    base = {"run_id": "r1", "project": "after", "environment": "prod", "started_at": datetime.now(timezone.utc), "finished_at": datetime.now(timezone.utc), "run_duration_ms": 1000, "run_status": "failed", "exit_code": 1, "scenario_id": 1, "test_name": "test_asset", "title": "Teste asset", "scenario_duration_ms": 1000, "pytest_status": "failed", "scope_type": "client", "validation_type": "Geral", "sequence": 1}
+    data = pd.DataFrame.from_records([
+        {**base, "result_id": 1, "client_id": "a", "scope_label": "a", "result_status": "failed", "message": "Índice 'a_asset' não encontrado."},
+        {**base, "result_id": 2, "client_id": "b", "scope_label": "b", "result_status": "passed", "message": "Índice 'b_asset' encontrado."},
+    ], columns=COLUMNS)
+    with patch("src.database.load_results", return_value=data) as query:
+        app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=20).run()
+        app.button[1].click().run()
+        app.radio[0].set_value("Por índice").run()
+        assert not app.exception
+        assert app.selectbox[0].value == "asset"
+        assert {expander.label for expander in app.expander} >= {"a", "b"}
+        assert query.call_count == 1
