@@ -36,13 +36,38 @@ def index_results(frame: pd.DataFrame) -> pd.DataFrame:
     return results
 
 
-def missing_index_details(frame: pd.DataFrame) -> pd.DataFrame:
+def missing_index_details(frame: pd.DataFrame, *, deduplicate: bool = True) -> pd.DataFrame:
     """Identifica índices explicitamente informados como ausentes pelos testes."""
     failures = frame[frame["result_status"] == "failed"].copy()
     extracted = failures["message"].fillna("").str.extract(_MISSING_INDEX)
     failures["index_name"] = extracted["quoted"].fillna(extracted["plain"])
     failures = failures[failures["index_name"].notna()]
-    return failures.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])
+    if deduplicate:
+        failures = failures.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])
+    return failures
+
+
+def percentage_failure_details(frame: pd.DataFrame) -> pd.DataFrame:
+    """Retorna mensagens de falha classificadas como comparação percentual."""
+    results = index_results(frame)
+    category = results["validation_type"].fillna("").astype(str)
+    return results[(results["result_status"] == "failed") & category.str.contains(
+        r"percentual|porcentagem", case=False, regex=True,
+    )].copy()
+
+
+def missing_document_details(frame: pd.DataFrame) -> pd.DataFrame:
+    """Retorna ausências de documentos explicitamente informadas no relatório."""
+    results = index_results(frame)
+    messages = results["message"].fillna("").astype(str)
+    failed_empty = (results["result_status"] == "failed") & messages.str.contains(_NO_DOCUMENTS, na=False)
+    zero_dates = messages.map(lambda message: bool(_EMPTY_DATE.search(message) or _EMPTY_SECOND_DATE.search(message))).astype(bool)
+    return results[failed_empty | zero_dates].copy()
+
+
+def count_affected_indexes(frame: pd.DataFrame) -> int:
+    """Conta índices distintos por projeto, ambiente e cliente ou origem."""
+    return len(frame.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"]))
 
 
 def empty_index_date_details(frame: pd.DataFrame, display_zone) -> pd.DataFrame:
@@ -107,6 +132,16 @@ def scenario_summary(frame: pd.DataFrame) -> pd.DataFrame:
                "pytest_status", "scenario_duration_ms", "run_id", "scenario_id"]
     scenarios = frame[frame["scenario_id"].notna()][columns].drop_duplicates(subset="scenario_id")
     return scenarios.sort_values(["started_at", "scenario_id"], ascending=[False, True])
+
+
+def run_duration_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    """Consolida o tempo total de cada execução sem duplicar mensagens ou cenários."""
+    columns = ["run_id", "project", "environment", "started_at", "run_duration_ms"]
+    runs = frame.loc[frame["run_id"].notna(), columns].drop_duplicates(subset="run_id").copy()
+    runs["run_duration_ms"] = pd.to_numeric(runs["run_duration_ms"], errors="coerce")
+    counts = frame.groupby("run_id")["scenario_id"].nunique().rename("scenario_count")
+    runs = runs.join(counts, on="run_id")
+    return runs.sort_values("started_at", ascending=False)
 
 
 def format_duration(value) -> str:

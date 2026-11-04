@@ -2,7 +2,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from src.analysis import apply_filters, empty_index_date_details, format_duration, index_results, missing_index_details, scenario_summary, summarize
+from src.analysis import apply_filters, count_affected_indexes, empty_index_date_details, format_duration, index_results, missing_document_details, missing_index_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize
 
 
 def sample():
@@ -80,3 +80,31 @@ def test_index_view_groups_client_prefix_and_preserves_distinct_results():
     assert list(selected["index_family"]) == ["asset", "asset"]
     assert set(selected["result_status"]) == {"passed", "failed"}
     assert set(selected["client_id"]) == {"a", "b"}
+
+
+def test_issue_indicators_count_indexes_per_client_without_duplicate_messages():
+    base = sample().iloc[0].to_dict()
+    frame = pd.DataFrame([
+        {**base, "message": "Índice 'a_asset' não encontrado."},
+        {**base, "validation_type": "Comparação percentual", "message": "Índice 'a_asset' | total variou 60%."},
+        {**base, "validation_type": "Comparação percentual", "message": "Índice 'a_asset' | outro campo variou 80%."},
+        {**base, "validation_type": "Comparação percentual", "result_status": "passed", "message": "Índice 'a_ok' passou."},
+        {**base, "message": "Índice 'a_vuln' não retornou documentos com date em 2026-10-27."},
+        {**base, "result_status": "passed", "message": "Índice 'a_other' | consulta retornou 1 documento(s) em 2026-10-27 e 0 em 2026-10-26."},
+        {**base, "message": "Índice 'a_error' | erro ao consultar documentos."},
+    ])
+    assert count_affected_indexes(missing_index_details(frame)) == 1
+    assert count_affected_indexes(percentage_failure_details(frame)) == 1
+    assert len(percentage_failure_details(frame)) == 2
+    assert count_affected_indexes(missing_document_details(frame)) == 2
+
+
+def test_run_duration_summary_does_not_multiply_runs_by_results():
+    base = {**sample().iloc[0].to_dict(), "run_duration_ms": 90000}
+    frame = pd.DataFrame([base, {**base, "result_id": 2},
+                          {**base, "run_id": "r2", "project": "after", "run_duration_ms": 120000},
+                          {**base, "run_id": "r2", "project": "after", "scenario_id": 3, "run_duration_ms": 120000}])
+    result = run_duration_summary(frame)
+    assert len(result) == 2
+    assert dict(zip(result["run_id"], result["run_duration_ms"])) == {"r1": 90000, "r2": 120000}
+    assert dict(zip(result["run_id"], result["scenario_count"])) == {"r1": 1, "r2": 2}

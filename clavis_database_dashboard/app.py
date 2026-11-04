@@ -9,7 +9,9 @@ import altair as alt
 import psycopg
 import streamlit as st
 
-from src.analysis import SCENARIO_LABELS, STATUS_LABELS, apply_filters, empty_index_date_details, format_duration, index_results, missing_index_details, scenario_summary, summarize
+from src.analysis import (SCENARIO_LABELS, STATUS_LABELS, apply_filters, count_affected_indexes,
+                          empty_index_date_details, format_duration, index_results, missing_document_details,
+                          missing_index_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
 from src.database import DatabaseSettings, load_results
 
 
@@ -130,6 +132,28 @@ if filtered.empty:
     st.warning("Nenhum resultado corresponde aos filtros selecionados.")
     st.stop()
 
+indicator_data = {
+    "missing_index": ("Índices não encontrados", missing_index_details(filtered, deduplicate=False)),
+    "percentage": ("Índices com falha na comparação percentual", percentage_failure_details(filtered)),
+    "missing_document": ("Índices sem documentos encontrados", missing_document_details(filtered)),
+}
+detail_key = st.session_state.get("indicator_detail")
+if detail_key in indicator_data:
+    title, details = indicator_data[detail_key]
+    st.subheader(title)
+    if st.button("← Voltar à visão geral"):
+        st.session_state.pop("indicator_detail", None)
+        st.rerun()
+    st.caption("Resultados dos filtros aplicados, identificados nas mensagens registradas pelos testes.")
+    if details.empty:
+        st.info("Nenhum resultado encontrado para os filtros selecionados.")
+    else:
+        display = details[["project", "environment", "started_at", "title", "scope_label", "index_name", "validation_type", "message"]].copy()
+        display["started_at"] = pd.to_datetime(display["started_at"], utc=True).dt.tz_convert(display_zone).dt.strftime("%d/%m/%Y %H:%M")
+        display = display.rename(columns={"project": "Projeto", "environment": "Ambiente", "started_at": "Execução", "title": "Cenário", "scope_label": "Cliente ou origem", "index_name": "Índice", "validation_type": "Validação", "message": "Detalhe"})
+        st.dataframe(display, hide_index=True, use_container_width=True)
+    st.stop()
+
 overview, validations = st.tabs(["Visão geral", "Validações"])
 with overview:
     st.subheader("Resumo do período")
@@ -139,26 +163,43 @@ with overview:
     row[1].metric("Cenários distintos", metrics["scenarios"])
     row[2].metric("Clientes distintos", metrics["clients"])
     st.caption("Cenários são contados por projeto e nome do teste; clientes, pelo identificador, sem duplicação entre execuções.")
-    missing_indexes = missing_index_details(filtered)
-    empty_dates = empty_index_date_details(filtered, display_zone)
-    missing_column, empty_column = st.columns(2)
-    missing_column.metric("Índices não encontrados", len(missing_indexes))
-    empty_column.metric("Índices sem documentos na data", len(empty_dates.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])))
-    empty_column.caption(f"Hoje: {(empty_dates['date_role'] == 'Hoje').sum()} · Ontem: {(empty_dates['date_role'] == 'Ontem').sum()}")
-    if not missing_indexes.empty:
-        with st.expander("Ver índices não encontrados"):
-            st.dataframe(missing_indexes[["project", "environment", "scope_label", "index_name", "message"]].rename(columns={
-                "project": "Projeto", "environment": "Ambiente", "scope_label": "Cliente ou origem",
-                "index_name": "Índice", "message": "Detalhe",
-            }), hide_index=True, use_container_width=True)
-    st.caption("Índices explicitamente reportados como não encontrados, sem repetição por projeto, ambiente e cliente ou origem.")
-    if not empty_dates.empty:
-        with st.expander("Ver índices sem documentos por data"):
-            st.dataframe(empty_dates[["project", "environment", "scope_label", "index_name", "date_role", "document_date", "message"]].rename(columns={
-                "project": "Projeto", "environment": "Ambiente", "scope_label": "Cliente ou origem",
-                "index_name": "Índice", "date_role": "Data da consulta", "document_date": "Data", "message": "Detalhe",
-            }), hide_index=True, use_container_width=True)
-    st.caption("Hoje e ontem referem-se à data de cada execução. Os totais são distintos por índice, projeto, ambiente e cliente ou origem; um índice pode aparecer nas duas datas. A identificação depende das mensagens registradas pelos testes.")
+    st.subheader("Duração da bateria completa por projeto")
+    run_filters = {key: st.session_state["dashboard_filters"].get(key, []) for key in ("project", "environment")}
+    runs = run_duration_summary(apply_filters(data, run_filters))
+    maximums = runs.groupby("project")["scenario_count"].transform("max")
+    complete_runs = runs[(runs["scenario_count"] > 0) & (runs["scenario_count"] == maximums)]
+    complete_runs = complete_runs[complete_runs["run_id"].isin(filtered["run_id"])].drop_duplicates(subset=["project"])
+    if complete_runs.empty:
+        st.info("Nenhuma execução com a maior quantidade de cenários encontrada nos filtros selecionados.")
+    else:
+        duration_columns = st.columns(len(complete_runs))
+        for column, (_, run) in zip(duration_columns, complete_runs.iterrows()):
+            started = pd.to_datetime(run["started_at"], utc=True).tz_convert(display_zone).strftime("%d/%m/%Y %H:%M")
+            column.metric(f"Bateria completa · {run['project'].capitalize()}", format_duration(run["run_duration_ms"]))
+            column.caption(f"{run['scenario_count']} cenários · {run['environment']} · {started}")
+        st.caption("Critério: maior quantidade de cenários registrados no período por projeto; em caso de empate, a execução mais recente. O banco não informa explicitamente se a bateria foi completa.")
+    st.subheader("Problemas nos índices")
+    indicator_columns = st.columns(3)
+    for column, (key, (title, details)) in zip(indicator_columns, indicator_data.items()):
+        with column:
+            count = count_affected_indexes(details)
+            if st.button(f"{title}: {count}", key=f"indicator_{key}", use_container_width=True):
+                st.session_state["indicator_detail"] = key
+                st.rerun()
+            if key == "missing_document":
+                dated = empty_index_date_details(filtered, display_zone)
+                st.caption(f"Hoje: {(dated['date_role'] == 'Hoje').sum()} · Ontem: {(dated['date_role'] == 'Ontem').sum()} (referentes a cada execução)")
+            if details.empty:
+                st.caption("Nenhum índice identificado.")
+            else:
+                unique = details.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])
+                chart_data = unique.groupby("index_name").size().nlargest(5).reset_index(name="Clientes ou origens")
+                st.altair_chart(alt.Chart(chart_data).mark_bar(color="#dc3545").encode(
+                    x=alt.X("Clientes ou origens:Q", title="Clientes ou origens"),
+                    y=alt.Y("index_name:N", title=None, sort="-x"),
+                    tooltip=["index_name:N", "Clientes ou origens:Q"],
+                ).properties(height=140), use_container_width=True)
+    st.caption("Totais de índices distintos por projeto, ambiente e cliente ou origem. Clique em um indicador para ver os detalhes. A identificação depende das mensagens dos testes.")
     stages = filtered[filtered["result_id"].notna()].drop_duplicates(
         subset=["scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
     ).copy()
