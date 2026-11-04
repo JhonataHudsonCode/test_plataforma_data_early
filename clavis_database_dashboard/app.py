@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import inspect
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -154,7 +155,30 @@ if detail_key in indicator_data:
         st.dataframe(display, hide_index=True, use_container_width=True)
     st.stop()
 
-overview, validations = st.tabs(["Visão geral", "Validações"])
+selected_index = st.session_state.get("index_detail")
+if selected_index is not None:
+    st.subheader(f"Falhas do índice: {selected_index}")
+    if st.button("← Voltar aos índices"):
+        st.session_state.pop("index_detail", None)
+        st.session_state["return_to_indices"] = True
+        st.rerun()
+    index_data = index_results(filtered)
+    failures_for_index = index_data[(index_data["index_family"] == selected_index) & (index_data["result_status"] == "failed")]
+    if failures_for_index.empty:
+        st.info("Nenhuma falha registrada para este índice nos filtros selecionados.")
+    else:
+        st.caption("Falhas organizadas por cliente ou origem. Os filtros aplicados continuam válidos.")
+        for scope, scope_data in failures_for_index.groupby("scope_label", sort=True, dropna=False):
+            with st.expander(str(scope) if pd.notna(scope) else "Não informado"):
+                for _, item in scope_data.sort_values(["started_at", "sequence"], ascending=[False, True]).iterrows():
+                    started = pd.to_datetime(item["started_at"], utc=True).tz_convert(display_zone).strftime("%d/%m/%Y %H:%M")
+                    st.write(f"{started} · {item['project']} / {item['environment']} · {item['title']} · {item['index_name']} · [{item['validation_type']}] {item['message']}")
+    st.stop()
+
+tab_options = {}
+if st.session_state.pop("return_to_indices", False) and "default" in inspect.signature(st.tabs).parameters:
+    tab_options["default"] = "Índices"
+overview, indices_tab, validations = st.tabs(["Visão geral", "Índices", "Validações"], **tab_options)
 with overview:
     st.subheader("Resumo do período")
     metrics = summarize(filtered)
@@ -285,6 +309,32 @@ with overview:
         "scenario_duration_ms": "Duração", "run_id": "Execução", "scenario_id": "ID do cenário",
     })
     st.dataframe(scenarios, hide_index=True, use_container_width=True)
+
+with indices_tab:
+    st.subheader("Resultados por índice")
+    indexed = index_results(filtered)
+    st.caption("Índices identificados nas mensagens dos testes do Early e After, conforme os filtros aplicados. Nomes com o prefixo do cliente são agrupados pelo tipo de índice.")
+    if indexed.empty:
+        st.info("Nenhum índice identificado nas mensagens dos resultados selecionados.")
+    else:
+        index_families = sorted(indexed["index_family"].unique(), key=str.casefold)
+        chosen_indexes = st.multiselect("Filtrar índices", index_families)
+        visible = indexed[indexed["index_family"].isin(chosen_indexes)] if chosen_indexes else indexed
+        for family in sorted(visible["index_family"].unique(), key=str.casefold):
+            family_data = visible[visible["index_family"] == family]
+            stages_for_index = family_data.drop_duplicates(subset=["scenario_id", "scope_type", "scope_label", "validation_type", "result_status"])
+            counts = stages_for_index["result_status"].value_counts()
+            chart_data = pd.DataFrame({"Resultado": ["Falha", "Aprovado", "Informativo"], "Quantidade": [int(counts.get(status, 0)) for status in ("failed", "passed", "info")]})
+            st.markdown(f"**{family}**")
+            st.altair_chart(alt.Chart(chart_data).mark_bar().encode(
+                x=alt.X("Resultado:N", title=None, sort=None), y=alt.Y("Quantidade:Q", title="Validações"),
+                color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"]), legend=None),
+                tooltip=["Resultado:N", "Quantidade:Q"],
+            ).properties(height=160), use_container_width=True)
+            if st.button(f"Ver falhas · {family}", key=f"index_failures_{family}"):
+                st.session_state["index_detail"] = family
+                st.rerun()
+        st.caption("Cada barra conta validações distintas por cenário, cliente ou origem, tipo e resultado; mensagens sem índice identificável não são incluídas.")
 
 with validations:
     view = st.radio("Visualização", ["Por cenário", "Por índice"], horizontal=True)

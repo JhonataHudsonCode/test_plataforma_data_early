@@ -43,14 +43,14 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         next(button for button in app.button if button.label == "Confirmar seleção").click().run()
         assert query.call_count == 1
         assert any("1 cenário(s) selecionado(s)" in caption.value for caption in app.caption), ([c.value for c in app.caption], list(app.exception))
-        app.multiselect[0].set_value(["after"]).run()
+        next(widget for widget in app.multiselect if widget.label == "Projeto").set_value(["after"]).run()
         assert query.call_count == 1
-        app.multiselect[4].set_value(["passed"])
+        next(widget for widget in app.multiselect if widget.label == "Resultado da validação").set_value(["passed"])
         assert any(item.value == "Resultado das validações" for item in app.subheader)
         next(button for button in app.button if button.label == "Pesquisar").click().run()
         assert query.call_count == 2
         assert any("Nenhum resultado corresponde" in warning.value for warning in app.warning)
-        app.multiselect[4].set_value([])
+        next(widget for widget in app.multiselect if widget.label == "Resultado da validação").set_value([])
         assert query.call_count == 2
         next(button for button in app.button if button.label == "Pesquisar").click().run()
         assert query.call_count == 3
@@ -67,7 +67,7 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         next(button for button in app.button if button.label == "Pesquisar").click().run()
         assert query.call_count == 5
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == ["Visão geral", "Validações"]
+    assert [tab.label for tab in app.tabs] == ["Visão geral", "Índices", "Validações"]
     assert any(item.value == "Resultado das validações" for item in app.subheader)
     assert any(metric.label == "Bateria completa · After" and metric.value == "00:00:02.00" for metric in app.metric)
     headings = {item.value for item in app.subheader}
@@ -86,10 +86,20 @@ def test_index_view_displays_failures_and_successes_for_all_clients(monkeypatch)
     data = pd.DataFrame.from_records([
         {**base, "result_id": 1, "client_id": "a", "scope_label": "a", "result_status": "failed", "message": "Índice 'a_asset' não encontrado."},
         {**base, "result_id": 2, "client_id": "b", "scope_label": "b", "result_status": "passed", "message": "Índice 'b_asset' encontrado."},
+        {**base, "result_id": 3, "client_id": "b", "scope_label": "b", "result_status": "passed", "message": "Índice 'b_score' encontrado."},
     ], columns=COLUMNS)
     with patch("src.database.load_results", return_value=data) as query:
         app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=20).run()
         next(button for button in app.button if button.label == "Pesquisar").click().run()
+        assert [tab.label for tab in app.tabs] == ["Visão geral", "Índices", "Validações"]
+        next(widget for widget in app.multiselect if widget.label == "Filtrar índices").set_value(["asset"]).run()
+        assert not any(button.label == "Ver falhas · score" for button in app.button)
+        next(button for button in app.button if button.label == "Ver falhas · asset").click().run()
+        assert any(header.value == "Falhas do índice: asset" for header in app.subheader)
+        assert any(expander.label == "a" for expander in app.expander)
+        assert not any(expander.label == "b" for expander in app.expander)
+        next(button for button in app.button if button.label == "← Voltar aos índices").click().run()
+        assert next(widget for widget in app.multiselect if widget.label == "Filtrar índices").value == ["asset"]
         app.radio[0].set_value("Por índice").run()
         assert not app.exception
         assert app.selectbox[0].value == "asset"
