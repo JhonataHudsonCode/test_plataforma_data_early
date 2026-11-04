@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.services.structured_validation import percentage_message
+
 import json
 import math
 from datetime import date
@@ -33,6 +35,7 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
         variation_controller: OtoScoreVariationController | None = None,
         configuration_path: Path | None = None,
     ) -> None:
+        self._reference_date = reference_date
         self._reference_month = reference_date.strftime("%Y-%m")
         self._variation_controller = variation_controller or OtoScoreVariationController()
         self._configuration_path = configuration_path or self._CONFIGURATION_PATH
@@ -366,9 +369,13 @@ class OtoScoreDataValidator(OtoDashboardSectionValidator):
             f"mais recente={latest_value}, variação={variation}; "
             f"limites: +{limits.maximum_increase:.0%}/-{limits.maximum_decrease:.0%}."
         )
-        details.append(message)
+        metadata = dict(index_name=index_name, attribute_name=attribute_path,
+                        previous=previous_value, current=latest_value, reference_date=self._reference_date,
+                        max_increase=limits.maximum_increase * 100, max_decrease=limits.maximum_decrease * 100)
+        details.append(percentage_message(message, **metadata))
         if not result.is_valid:
-            errors.append(f"{message} Erro: {result.reason}.")
+            errors.append(percentage_message(f"{message} Erro: {result.reason}.",
+                                             reason_code="PERCENTAGE_LIMIT_EXCEEDED", **metadata))
 
     def _load_object_controls(self) -> dict[str, dict[str, Any]]:
         configuration = json.loads(self._configuration_path.read_text(encoding="utf-8"))

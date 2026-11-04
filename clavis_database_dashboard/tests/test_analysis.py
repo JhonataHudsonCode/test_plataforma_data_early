@@ -2,7 +2,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from src.analysis import apply_filters, count_affected_indexes, empty_index_date_details, format_duration, index_results, missing_document_details, missing_index_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize
+from src.analysis import apply_filters, count_affected_indexes, empty_index_date_details, format_duration, index_results, missing_document_details, missing_index_details, percentage_attribute_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize
 
 
 def sample():
@@ -108,3 +108,31 @@ def test_run_duration_summary_does_not_multiply_runs_by_results():
     assert len(result) == 2
     assert dict(zip(result["run_id"], result["run_duration_ms"])) == {"r1": 90000, "r2": 120000}
     assert dict(zip(result["run_id"], result["scenario_count"])) == {"r1": 1, "r2": 2}
+
+
+def test_percentage_attribute_values_and_zero_baseline():
+    frame = pd.DataFrame({"message": [
+        "Índice 'asset' | total de total_open aumentou 60% (ontem=10, hoje=16); limite permitido: 50%.",
+        "Índice 'asset' | total de total_fixed reduziu 70% (ontem=20, hoje=6); limite permitido: 50%.",
+        "Índice 'asset' | total de total_vulns variou de 0 para 3.5; não há base para uma variação de até 50%.",
+        "Índice 'asset' | total de total_other não pode possuir valor negativo (ontem=-1, hoje=2).",
+    ]})
+    result = percentage_attribute_details(frame).set_index("attribute")
+    assert set(result.index) == {"total_open", "total_fixed", "total_vulns"}
+    assert result.loc["total_open", "change_percent"] == 60
+    assert result.loc["total_fixed", "direction"] == "Redução"
+    assert result.loc["total_fixed", "change_percent"] == -70
+    assert pd.isna(result.loc["total_vulns", "change_percent"])
+    assert result.loc["total_vulns", "current_value"] == 3.5
+
+
+def test_structured_percentage_data_is_preferred_over_message_parsing():
+    row = {**sample().iloc[0].to_dict(), "message": "Mensagem sem os dados numéricos",
+           "index_name": "acme_asset", "index_type": "asset", "attribute_name": "total_open",
+           "previous_value": 2.5, "current_value": 7.5, "variation_percent": 200}
+    indexed = index_results(pd.DataFrame([row]))
+    assert indexed.iloc[0]["index_family"] == "asset"
+    structured = percentage_attribute_details(indexed)
+    assert structured.iloc[0]["previous_value"] == 2.5
+    assert structured.iloc[0]["current_value"] == 7.5
+    assert structured.iloc[0]["change_percent"] == 200

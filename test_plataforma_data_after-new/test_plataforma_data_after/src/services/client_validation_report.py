@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 from contextvars import ContextVar, Token
@@ -10,6 +11,7 @@ from html import escape
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 from src.services.report_html_layout import render_html_from_text
+from src.services.structured_validation import StructuredMessage
 
 
 _CURRENT_TEST_STARTED_AT: ContextVar[float | None] = ContextVar(
@@ -70,6 +72,25 @@ class ClientValidationReport:
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(report + "\n", encoding="utf-8")
+        metadata = {}
+        sequence = 0
+        from src.services.report_database import parse_report
+        for section, label in (("Falhas", "Motivo"), ("Informativos", "Informação"), ("Aprovados", "Detalhe")):
+            for client_id, messages in self._sections()[section]:
+                for message in messages:
+                    single = f"{section} (1):\n- Cliente: {client_id}\n{self._format_message_line(label, message)}\n"
+                    result_count = len(parse_report(single)["results"])
+                    if isinstance(message, StructuredMessage):
+                        entry = dict(message.metadata)
+                        name = entry.get("index_name", "")
+                        prefix = f"{client_id}_"
+                        entry["index_type"] = name[len(prefix):] if name.lower().startswith(prefix.lower()) else name
+                        if result_count:
+                            metadata[str(sequence + 1)] = entry
+                    sequence += result_count
+        output_path.with_suffix(".structured.json").write_text(
+            json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
+        )
         return report
 
     @classmethod

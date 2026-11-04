@@ -59,6 +59,9 @@ COLUMNS = [
     "test_name", "title", "bdd", "scenario_duration_ms", "pytest_status",
     "result_id", "scope_type", "client_id", "scope_label", "validation_type",
     "result_status", "message", "raw_message", "sequence", "recorded_at",
+    "index_name", "index_type", "attribute_name", "previous_value", "current_value",
+    "variation_percent", "comparison_direction", "comparison_limit_percent", "max_increase_percent",
+    "max_decrease_percent", "previous_date", "current_date", "reason_code",
 ]
 
 
@@ -71,7 +74,10 @@ def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> 
                s.duration_ms AS scenario_duration_ms, s.pytest_status,
                v.id AS result_id, v.scope_type, v.client_id, v.scope_label,
                v.validation_type, v.status AS result_status, v.message, v.raw_message,
-               v.sequence, v.recorded_at
+               v.sequence, v.recorded_at, v.index_name, v.index_type, v.attribute_name,
+               v.previous_value, v.current_value, v.variation_percent, v.comparison_direction,
+               v.comparison_limit_percent, v.max_increase_percent, v.max_decrease_percent,
+               v.previous_date, v.current_date, v.reason_code
         FROM {runs} AS r
         LEFT JOIN {scenarios} AS s ON s.run_id = r.id
         LEFT JOIN {results} AS v ON v.scenario_id = s.id

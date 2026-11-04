@@ -12,7 +12,7 @@ import streamlit as st
 
 from src.analysis import (SCENARIO_LABELS, STATUS_LABELS, apply_filters, count_affected_indexes,
                           empty_index_date_details, format_duration, index_results, missing_document_details,
-                          missing_index_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
+                          missing_index_details, percentage_attribute_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
 from src.database import DatabaseSettings, load_results
 
 
@@ -149,6 +149,39 @@ if detail_key in indicator_data:
     if details.empty:
         st.info("Nenhum resultado encontrado para os filtros selecionados.")
     else:
+        if detail_key == "percentage":
+            index_options = sorted(details["index_family"].dropna().unique().tolist(), key=str.casefold)
+            chosen_index = st.selectbox("Filtrar por índice", index_options)
+            details = details[details["index_family"] == chosen_index]
+            client_options = sorted(details["scope_label"].dropna().astype(str).unique().tolist(), key=str.casefold)
+            selected_clients = st.multiselect("Filtrar clientes ou origens", client_options)
+            if selected_clients:
+                details = details[details["scope_label"].isin(selected_clients)]
+            attribute_details = percentage_attribute_details(details)
+            st.caption("Os valores exibidos correspondem a cada falha registrada, sem somar clientes ou execuções diferentes.")
+            if attribute_details.empty:
+                st.info("As falhas selecionadas não informam valores de ontem e hoje em um formato reconhecido.")
+            else:
+                for attribute in sorted(attribute_details["attribute"].unique(), key=str.casefold):
+                    values = attribute_details[attribute_details["attribute"] == attribute].copy()
+                    st.subheader(f"Atributo: {attribute}")
+                    values["Execução"] = pd.to_datetime(values["started_at"], utc=True).dt.tz_convert(display_zone).dt.strftime("%d/%m/%Y %H:%M:%S")
+                    values["Comparação"] = values["scope_label"].fillna("Não informado").astype(str) + " · " + values["Execução"] + " · " + values["index_name"] + " · " + values["scenario_id"].astype(str) + " / " + values["result_id"].astype(str)
+                    values["Variação"] = values["change_percent"].map(lambda value: "Não calculável (ontem = 0)" if pd.isna(value) else f"{value:+.1f}%")
+                    chart_values = values.melt(id_vars=["Comparação", "direction", "Variação"], value_vars=["previous_value", "current_value"], var_name="Período", value_name="Valor")
+                    chart_values["Período"] = chart_values["Período"].map({"previous_value": "Ontem", "current_value": "Hoje"})
+                    st.altair_chart(alt.Chart(chart_values).mark_bar().encode(
+                        x=alt.X("Comparação:N", title="Cliente ou origem · execução · índice", axis=alt.Axis(labelAngle=-45)),
+                        xOffset=alt.XOffset("Período:N", sort=["Ontem", "Hoje"]),
+                        y=alt.Y("Valor:Q", title="Valor"),
+                        color=alt.Color("Período:N", scale=alt.Scale(domain=["Ontem", "Hoje"], range=["#6c757d", "#0d6efd"])),
+                        tooltip=["Comparação:N", "Período:N", "Valor:Q", alt.Tooltip("direction:N", title="Direção"), "Variação:N"],
+                    ), use_container_width=True)
+                    st.dataframe(values[["scope_label", "index_name", "Execução", "direction", "previous_value", "current_value", "Variação"]].rename(columns={
+                        "scope_label": "Cliente ou origem", "index_name": "Índice", "direction": "Direção",
+                        "previous_value": "Ontem", "current_value": "Hoje",
+                    }), hide_index=True, use_container_width=True)
+            st.subheader("Detalhes das falhas")
         display = details[["project", "environment", "started_at", "title", "scope_label", "index_name", "validation_type", "message"]].copy()
         display["started_at"] = pd.to_datetime(display["started_at"], utc=True).dt.tz_convert(display_zone).dt.strftime("%d/%m/%Y %H:%M")
         display = display.rename(columns={"project": "Projeto", "environment": "Ambiente", "started_at": "Execução", "title": "Cenário", "scope_label": "Cliente ou origem", "index_name": "Índice", "validation_type": "Validação", "message": "Detalhe"})

@@ -45,6 +45,7 @@ from src.validators.after_pipeline.asset_policy_compliance_document_validator im
     AssetPolicyComplianceDocumentValidator,
 )
 from src.validators.opensearch_mapping_validator import OpenSearchMappingValidator
+from src.services.structured_validation import StructuredMessage, percentage_message, structured_field_comparisons
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,10 +64,12 @@ class _CategorizedMessages:
         self._category = category
 
     def append(self, message: str) -> None:
-        self._messages.append(f"[{self._category}] {message}")
+        prefix = f"[{self._category}] "
+        self._messages.append(message.with_prefix(prefix) if isinstance(message, StructuredMessage) else prefix + message)
 
     def extend(self, messages: Iterable[str]) -> None:
-        self._messages.extend(f"[{self._category}] {message}" for message in messages)
+        for message in messages:
+            self.append(message)
 
 
 class ProductDataValidator:
@@ -655,8 +658,8 @@ class ProductDataValidator:
             self._validate_oto_dashboard_metrics(
                 index_name, current, previous, pair_errors, pair_details
             )
-            errors.extend(f"{context} | {message}" for message in pair_errors)
-            details.extend(f"{context} | {message}" for message in pair_details)
+            errors.extend(message.with_prefix(f"{context} | ") if isinstance(message, StructuredMessage) else f"{context} | {message}" for message in pair_errors)
+            details.extend(message.with_prefix(f"{context} | ") if isinstance(message, StructuredMessage) else f"{context} | {message}" for message in pair_details)
 
     @classmethod
     def _match_oto_documents(
@@ -840,16 +843,20 @@ class ProductDataValidator:
     ) -> None:
         """Sinaliza alteração absoluta acima de 50% entre scores consecutivos."""
         variation = abs(latest_value - previous_value) / abs(previous_value)
-        details.append(
+        details.append(percentage_message(
             f"Índice '{index_name}' | score {field_name}: anterior={previous_value}, "
-            f"mais recente={latest_value}, variação={variation:.0%}."
-        )
+            f"mais recente={latest_value}, variação={variation:.0%}.", index_name=index_name,
+            attribute_name=field_name, previous=previous_value, current=latest_value,
+            reference_date=None, max_increase=50, max_decrease=50
+        ))
         if variation > 0.5:
-            errors.append(
+            errors.append(percentage_message(
                 f"Índice '{index_name}' | score {field_name} variou {variation:.0%} "
                 f"(anterior={previous_value}, mais recente={latest_value}); "
-                "máximo permitido: 50%."
-            )
+                "máximo permitido: 50%.", index_name=index_name, attribute_name=field_name,
+                previous=previous_value, current=latest_value, reference_date=None,
+                max_increase=50, max_decrease=50, reason_code="PERCENTAGE_LIMIT_EXCEEDED"
+            ))
 
     def _validate_module_indices(
         self,
@@ -2100,6 +2107,7 @@ class ProductDataValidator:
             )
             return None
 
+    @structured_field_comparisons
     def _validate_directional_fifty_percent_variation(
         self,
         index_name: str,
@@ -2178,6 +2186,7 @@ class ProductDataValidator:
             value = value.get(field_name)
         return value
 
+    @structured_field_comparisons
     def _validate_fifty_percent_variation(
         self,
         index_name: str,
@@ -2227,6 +2236,7 @@ class ProductDataValidator:
                 f"hoje={current_value}, variação={variation:.0%}."
             )
 
+    @structured_field_comparisons
     def _validate_absolute_fifty_percent_variation(
         self,
         index_name: str,

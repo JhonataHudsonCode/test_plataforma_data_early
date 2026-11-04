@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS qa_reports.qa_test_results (
     raw_message text NOT NULL,
     sequence integer NOT NULL,
     recorded_at timestamptz NOT NULL DEFAULT now(),
+    index_name text,
+    index_type text,
+    attribute_name text,
+    previous_value numeric,
+    current_value numeric,
+    variation_percent numeric,
+    comparison_direction text,
+    comparison_limit_percent numeric,
+    max_increase_percent numeric,
+    max_decrease_percent numeric,
+    previous_date date,
+    current_date date,
+    reason_code text,
     UNIQUE (scenario_id, sequence)
 );
 

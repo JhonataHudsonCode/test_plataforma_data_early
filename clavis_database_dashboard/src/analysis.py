@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 import re
+import math
 
 
 STATUS_LABELS = {"passed": "Aprovado", "failed": "Falha", "info": "Informativo"}
@@ -23,12 +24,15 @@ def index_results(frame: pd.DataFrame) -> pd.DataFrame:
     """Agrupa nomes de índices por tipo, removendo o prefixo do próprio cliente."""
     results = frame[frame["result_id"].notna()].copy()
     names = results["message"].fillna("").str.extract(_INDEX_NAME)
-    results["index_name"] = names["quoted"].fillna(names["plain"])
+    extracted = names["quoted"].fillna(names["plain"])
+    results["index_name"] = results["index_name"].astype("string").fillna(extracted.astype("string")) if "index_name" in results else extracted
     results = results[results["index_name"].notna()].copy()
     results = results[~results["index_name"].str.casefold().isin({"não", "nao", "foi", "com", "do", "da", "de", "para"})].copy()
 
     def family(row):
         name, client = row["index_name"], row.get("client_id")
+        if pd.notna(row.get("index_type")) and str(row.get("index_type")).strip():
+            return str(row["index_type"])
         prefix = f"{client}_" if pd.notna(client) and str(client).strip() else ""
         return name[len(prefix):] if prefix and name.casefold().startswith(prefix.casefold()) else name
 
@@ -54,6 +58,45 @@ def percentage_failure_details(frame: pd.DataFrame) -> pd.DataFrame:
     return results[(results["result_status"] == "failed") & category.str.contains(
         r"percentual|porcentagem", case=False, regex=True,
     )].copy()
+
+
+def percentage_attribute_details(frame: pd.DataFrame) -> pd.DataFrame:
+    """Extrai valores explícitos de mensagens de variação por atributo."""
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    attribute_pattern = re.compile(r"\btotal\s+de\s+([\w.\-]+)\s+(?:aumentou|reduziu|variou)\b", re.IGNORECASE)
+    values_pattern = re.compile(rf"ontem\s*=\s*({number})\s*,\s*hoje\s*=\s*({number})", re.IGNORECASE)
+    zero_pattern = re.compile(rf"(?:aumentou|reduziu|variou)\s+de\s+({number})\s+para\s+({number})", re.IGNORECASE)
+    records = []
+    for _, row in frame.iterrows():
+        message = row.get("message")
+        if not isinstance(message, str):
+            continue
+        attribute_name = row.get("attribute_name")
+        previous_value, current_value = row.get("previous_value"), row.get("current_value")
+        if pd.notna(attribute_name) and pd.notna(previous_value) and pd.notna(current_value):
+            previous, current = float(previous_value), float(current_value)
+            if math.isfinite(previous) and math.isfinite(current):
+                record = row.to_dict()
+                stored_variation = row.get("variation_percent")
+                change = float(stored_variation) if pd.notna(stored_variation) else None
+                record.update(attribute=attribute_name, previous_value=previous, current_value=current,
+                              change_percent=change, direction="Aumento" if current > previous else "Redução" if current < previous else "Sem alteração")
+                records.append(record)
+                continue
+        attribute = attribute_pattern.search(message)
+        values = values_pattern.search(message) or zero_pattern.search(message)
+        if not attribute or not values:
+            continue
+        previous, current = map(float, values.groups())
+        if not math.isfinite(previous) or not math.isfinite(current):
+            continue
+        change = ((current - previous) / abs(previous) * 100) if previous != 0 else None
+        record = row.to_dict()
+        record.update(attribute=attribute.group(1), previous_value=previous, current_value=current,
+                      change_percent=change, direction="Aumento" if current > previous else "Redução" if current < previous else "Sem alteração")
+        records.append(record)
+    columns = list(dict.fromkeys([*frame.columns, "attribute", "previous_value", "current_value", "change_percent", "direction"]))
+    return pd.DataFrame(records, columns=columns)
 
 
 def missing_document_details(frame: pd.DataFrame) -> pd.DataFrame:
@@ -97,7 +140,7 @@ def empty_index_date_details(frame: pd.DataFrame, display_zone) -> pd.DataFrame:
                 record.update(index_name=index_match.group("quoted") or index_match.group("plain"),
                               date_role="Hoje" if delta == 0 else "Ontem", document_date=raw_date)
                 records.append(record)
-    columns = [*frame.columns, "index_name", "date_role", "document_date"]
+    columns = list(dict.fromkeys([*frame.columns, "index_name", "date_role", "document_date"]))
     result = pd.DataFrame(records, columns=columns)
     return result.drop_duplicates(subset=["project", "environment", "scope_label", "index_name", "date_role"])
 

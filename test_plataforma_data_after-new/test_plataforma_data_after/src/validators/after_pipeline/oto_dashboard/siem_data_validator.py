@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.services.structured_validation import percentage_message
+
 import json
 from datetime import date
 from pathlib import Path
@@ -25,7 +27,7 @@ class OtoSiemDataValidator(OtoDashboardSectionValidator):
         variation_controller: OtoScoreVariationController | None = None,
         configuration_path: Path | None = None,
     ) -> None:
-        del reference_date
+        self._reference_date = reference_date
         self._variation_controller = variation_controller or OtoScoreVariationController()
         self._configuration_path = configuration_path or self._CONFIGURATION_PATH
 
@@ -175,9 +177,13 @@ class OtoSiemDataValidator(OtoDashboardSectionValidator):
             f"variação={variation}; limites: +{limits.maximum_increase:.0%}/"
             f"-{limits.maximum_decrease:.0%}."
         )
-        details.append(message)
+        metadata = dict(index_name=index_name, attribute_name=attribute_path,
+                        previous=previous_value, current=latest_value, reference_date=self._reference_date,
+                        max_increase=limits.maximum_increase * 100, max_decrease=limits.maximum_decrease * 100)
+        details.append(percentage_message(message, **metadata))
         if not result.is_valid:
-            errors.append(f"{message} Erro: {result.reason}.")
+            errors.append(percentage_message(f"{message} Erro: {result.reason}.",
+                                             reason_code="PERCENTAGE_LIMIT_EXCEEDED", **metadata))
 
     def _load_controls(self) -> tuple[dict[str, str], str, dict[str, str], str]:
         controls: dict[str, Any] = json.loads(

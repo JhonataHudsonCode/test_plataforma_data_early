@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -130,7 +131,12 @@ def persist_session_reports(session, exitstatus: int, project: str, report_paths
     elapsed_ms = round((perf_counter() - session._validation_started_at) * 1000)
     run_id = uuid4()
     outcomes = getattr(session.config, "_report_db_outcomes", {})
-    reports = {path.stem: parse_report(path.read_text(encoding="utf-8")) for path in report_paths}
+    reports = {}
+    for path in report_paths:
+        parsed = parse_report(path.read_text(encoding="utf-8"))
+        sidecar = path.with_suffix(".structured.json")
+        parsed["structured"] = json.loads(sidecar.read_text(encoding="utf-8")) if sidecar.is_file() else {}
+        reports[path.stem] = parsed
     scenario_rows: list[tuple[str, dict, dict]] = []
     matched: set[str] = set()
     for node_id, outcome in outcomes.items():
@@ -158,12 +164,16 @@ def persist_session_reports(session, exitstatus: int, project: str, report_paths
                 scenario_id = cursor.fetchone()[0]
                 rows = [
                     (scenario_id, result["scope_type"], result["client_id"], result["scope_label"],
-                     result["validation_type"], result["status"], result["message"], result["raw_message"], sequence)
+                     result["validation_type"], result["status"], result["message"], result["raw_message"], sequence,
+                     *(report.get("structured", {}).get(str(sequence), {}).get(field) for field in (
+                         "index_name", "index_type", "attribute_name", "previous_value", "current_value",
+                         "variation_percent", "comparison_direction", "comparison_limit_percent", "max_increase_percent",
+                         "max_decrease_percent", "previous_date", "current_date", "reason_code")))
                     for sequence, result in enumerate(report.get("results", []), start=1)
                 ]
                 if rows:
                     cursor.executemany(
-                        sql.SQL("INSERT INTO {} (scenario_id, scope_type, client_id, scope_label, validation_type, status, message, raw_message, sequence) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)").format(table("qa_test_results")),
+                        sql.SQL("INSERT INTO {} (scenario_id, scope_type, client_id, scope_label, validation_type, status, message, raw_message, sequence, index_name, index_type, attribute_name, previous_value, current_value, variation_percent, comparison_direction, comparison_limit_percent, max_increase_percent, max_decrease_percent, previous_date, current_date, reason_code) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)").format(table("qa_test_results")),
                         rows,
                     )
     logger.info("Resultados da execução %s gravados no PostgreSQL (%s).", run_id, project)

@@ -113,7 +113,7 @@ def test_indicator_buttons_open_details_and_return_without_query(monkeypatch):
     base = {"run_id": "r1", "project": "after", "environment": "prod", "started_at": datetime.now(timezone.utc), "finished_at": datetime.now(timezone.utc), "run_duration_ms": 1000, "run_status": "failed", "exit_code": 1, "scenario_id": 1, "test_name": "test_asset", "title": "Teste asset", "scenario_duration_ms": 1000, "pytest_status": "failed", "scope_type": "client", "client_id": "cliente-a", "scope_label": "cliente-a", "result_status": "failed", "sequence": 1}
     data = pd.DataFrame.from_records([
         {**base, "result_id": 1, "validation_type": "Geral", "message": "Índice 'asset' não encontrado."},
-        {**base, "result_id": 2, "validation_type": "Comparação percentual", "message": "Índice 'asset' | variação acima de 50%."},
+        {**base, "result_id": 2, "validation_type": "Comparação percentual", "message": "Índice 'asset' | total de total_open aumentou 60% (ontem=10, hoje=16); limite permitido: 50%."},
         {**base, "result_id": 3, "validation_type": "Timestamp", "message": "Índice 'asset' não retornou documentos em 2026-11-04."},
     ], columns=COLUMNS)
     with patch("src.database.load_results", return_value=data) as query:
@@ -123,8 +123,13 @@ def test_indicator_buttons_open_details_and_return_without_query(monkeypatch):
             next(button for button in app.button if button.label == f"{label}: 1").click().run()
             assert not app.exception
             assert any(header.value == label for header in app.subheader)
-            assert len(app.dataframe) == 1
-            table = app.dataframe[0].value
+            if label == "Índices com falha na comparação percentual":
+                assert app.selectbox[0].value == "asset"
+                assert any(header.value == "Atributo: total_open" for header in app.subheader)
+                values = app.dataframe[0].value
+                assert values.iloc[0]["Ontem"] == 10
+                assert values.iloc[0]["Hoje"] == 16
+            table = app.dataframe[-1].value
             assert table.iloc[0]["Índice"] == "asset"
             assert table.iloc[0]["Cliente ou origem"] == "cliente-a"
             next(button for button in app.button if "Voltar à visão geral" in button.label).click().run()
