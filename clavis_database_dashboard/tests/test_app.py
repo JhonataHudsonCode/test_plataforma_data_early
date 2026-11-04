@@ -4,9 +4,20 @@ from unittest.mock import patch
 
 import pandas as pd
 import psycopg
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from src.database import COLUMNS
+
+
+@pytest.fixture(autouse=True)
+def filter_options(monkeypatch):
+    monkeypatch.setattr("src.database.load_filter_options", lambda settings: {
+        "project": ["after", "early"], "environment": ["prod"],
+        "title": ["Validar mapping", "Teste asset", "Teste"],
+        "client_id": ["cliente-a", "a", "b"],
+        "validation_type": ["Mapping", "Timestamp", "Geral", "Comparação percentual"],
+    })
 
 
 def test_dashboard_shows_overview_and_validation_details(monkeypatch):
@@ -39,7 +50,7 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         assert not app.exception
         next(button for button in app.button if button.label == "Selecionar cenários").click().run()
         assert any(option.label == "Validar mapping" for option in app.checkbox)
-        app.checkbox[0].check()
+        next(box for box in app.checkbox if box.label == "Validar mapping").check()
         next(button for button in app.button if button.label == "Confirmar seleção").click().run()
         assert query.call_count == 1
         assert any("1 cenário(s) selecionado(s)" in caption.value for caption in app.caption), ([c.value for c in app.caption], list(app.exception))
@@ -54,6 +65,8 @@ def test_dashboard_shows_overview_and_validation_details(monkeypatch):
         assert query.call_count == 2
         next(button for button in app.button if button.label == "Pesquisar").click().run()
         assert query.call_count == 3
+        assert not app.exception, list(app.exception)
+        assert app.selectbox, (app.session_state["dashboard_filters"], [warning.value for warning in app.warning])
         assert app.selectbox[0].value == "Todas as validações"
         assert all(any(text in item.value for item in app.markdown) for text in
                    ("[Mapping] campo ausente", "[Timestamp] data válida", "[Geral] índice encontrado"))
@@ -105,6 +118,34 @@ def test_index_view_displays_failures_and_successes_for_all_clients(monkeypatch)
         assert app.selectbox[0].value == "asset"
         assert {expander.label for expander in app.expander} >= {"a", "b"}
         assert query.call_count == 1
+
+
+def test_all_filters_can_be_selected_before_first_search(monkeypatch):
+    for key, value in {"REPORT_DB_HOST": "localhost", "REPORT_DB_DATABASE": "reports", "REPORT_DB_USER": "reader", "REPORT_DB_PASSWORD": "fake"}.items():
+        monkeypatch.setenv(key, value)
+    now = datetime.now(timezone.utc)
+    base = {"run_id": "r1", "project": "after", "environment": "prod", "started_at": now, "finished_at": now,
+            "run_duration_ms": 1000, "run_status": "passed", "exit_code": 0, "scenario_id": 1,
+            "test_name": "test_mapping", "title": "Validar mapping", "scenario_duration_ms": 1000,
+            "pytest_status": "passed", "result_id": 1, "scope_type": "client", "client_id": "cliente-a",
+            "scope_label": "cliente-a", "validation_type": "Mapping", "result_status": "passed", "message": "ok", "sequence": 1}
+    data = pd.DataFrame.from_records([base, {**base, "result_id": 2, "client_id": "b", "scope_label": "b"}], columns=COLUMNS)
+    with patch("src.database.load_results", return_value=data) as query:
+        app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=20).run()
+        next(widget for widget in app.multiselect if widget.label == "Projeto").set_value(["after"]).run()
+        next(widget for widget in app.multiselect if widget.label == "Ambiente").set_value(["prod"]).run()
+        next(widget for widget in app.multiselect if widget.label == "Cliente").set_value(["cliente-a"]).run()
+        next(widget for widget in app.multiselect if widget.label == "Tipo de validação").set_value(["Mapping"]).run()
+        next(widget for widget in app.multiselect if widget.label == "Resultado da validação").set_value(["passed"]).run()
+        next(button for button in app.button if button.label == "Selecionar cenários").click().run()
+        next(box for box in app.checkbox if box.label == "Validar mapping").check()
+        next(button for button in app.button if button.label == "Confirmar seleção").click().run()
+        assert query.call_count == 0
+        next(button for button in app.button if button.label == "Pesquisar").click().run()
+        assert query.call_count == 1
+        assert not app.exception
+        assert any(metric.label == "Clientes distintos" and metric.value == "1" for metric in app.metric)
+        assert app.session_state["dashboard_filters"]["title"] == ["Validar mapping"]
 
 
 def test_indicator_buttons_open_details_and_return_without_query(monkeypatch):

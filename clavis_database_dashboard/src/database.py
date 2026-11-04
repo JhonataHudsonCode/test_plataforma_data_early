@@ -65,6 +65,38 @@ COLUMNS = [
 ]
 
 
+def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
+    """Carrega valores distintos para seleção antes da consulta de resultados."""
+    query = sql.SQL("""
+        SELECT DISTINCT 'project' AS kind, project AS value FROM {runs} WHERE project IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT 'environment' AS kind, environment AS value FROM {runs} WHERE environment IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT 'title' AS kind, title AS value FROM {scenarios} WHERE title IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT 'client_id' AS kind, client_id AS value FROM {results} WHERE client_id IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT 'validation_type' AS kind, validation_type AS value FROM {results} WHERE validation_type IS NOT NULL
+    """).format(
+        runs=sql.Identifier(settings.schema, "qa_test_runs"),
+        scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"),
+        results=sql.Identifier(settings.schema, "qa_test_results"),
+    )
+    options = {key: [] for key in ("project", "environment", "title", "client_id", "validation_type")}
+    with psycopg.connect(
+        host=settings.host, port=settings.port, dbname=settings.database,
+        user=settings.user, password=settings.password,
+        connect_timeout=settings.connect_timeout, row_factory=dict_row,
+    ) as connection:
+        connection.read_only = True
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            for row in cursor.fetchall():
+                if row["kind"] in options and row["value"]:
+                    options[row["kind"]].append(str(row["value"]))
+    return {key: sorted(set(values), key=str.casefold) for key, values in options.items()}
+
+
 def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> pd.DataFrame:
     """Carrega uma linha por mensagem; preserva cenários sem mensagens."""
     query = sql.SQL("""

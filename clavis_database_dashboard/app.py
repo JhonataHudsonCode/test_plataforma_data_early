@@ -13,12 +13,21 @@ import streamlit as st
 from src.analysis import (SCENARIO_LABELS, STATUS_LABELS, apply_filters, count_affected_indexes,
                           empty_index_date_details, format_duration, index_results, missing_document_details,
                           missing_index_details, percentage_attribute_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
-from src.database import DatabaseSettings, load_results
+from src.database import DatabaseSettings, load_filter_options, load_results
 
 
 st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
 st.markdown(
-    '<style>[data-testid="stAppDeployButton"] { display: none !important; }</style>',
+    """<style>
+    [data-testid="stAppDeployButton"] { display: none !important; }
+    [data-testid="stAppViewContainer"], [data-testid="stSidebar"] { background: #FFFFFF; color: #1E2123; }
+    [data-testid="stSidebar"] { border-color: #709C99; }
+    h1, h2, h3 { color: #2C6966; }
+    [data-testid="stMetric"] { border-color: #709C99; }
+    [data-testid="stMetricValue"] { color: #1972E8; }
+    [data-baseweb="tab"][aria-selected="true"] { color: #2C6966; }
+    [data-testid="stExpander"] { border-color: #709C99; }
+    </style>""",
     unsafe_allow_html=True,
 )
 st.title("Dashboard de testes Clavis")
@@ -35,11 +44,19 @@ except (ValueError, ZoneInfoNotFoundError) as error:
 today = datetime.now(display_zone).date()
 data = st.session_state.get("dashboard_data")
 
+if "dashboard_filter_options" not in st.session_state:
+    try:
+        with st.spinner("Carregando opções dos filtros..."):
+            st.session_state["dashboard_filter_options"] = load_filter_options(settings)
+    except (psycopg.Error, OSError):
+        st.error("Não foi possível carregar os filtros do PostgreSQL de relatórios. Confira a conexão e tente novamente.")
+        if st.button("Tentar carregar filtros novamente"):
+            st.rerun()
+        st.stop()
+
 
 def choices(column: str) -> list[str]:
-    if data is None or data.empty:
-        return []
-    return sorted(data[column].dropna().astype(str).unique().tolist(), key=str.casefold)
+    return st.session_state["dashboard_filter_options"].get(column, [])
 
 
 def close_scenario_dialog() -> None:
@@ -102,7 +119,7 @@ with st.sidebar:
             if search_error:
                 st.session_state["dashboard_search_error"] = True
                 st.rerun()
-    st.caption("As opções de projeto, cenário e cliente são carregadas após a primeira pesquisa. Ajuste os filtros e clique em Pesquisar para aplicá-los.")
+    st.caption("As opções abrangem os dados disponíveis no banco. Ajuste os filtros e clique em Pesquisar para aplicá-los.")
 
 if st.session_state.pop("dashboard_search_error", False):
     st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
@@ -112,6 +129,11 @@ if submitted:
         st.error("A data inicial deve ser anterior ou igual à data final.")
         st.stop()
     st.session_state["dashboard_data"] = data
+    if not data.empty:
+        for column, existing in st.session_state["dashboard_filter_options"].items():
+            st.session_state["dashboard_filter_options"][column] = sorted(
+                set(existing) | set(data[column].dropna().astype(str)), key=str.casefold
+            )
     st.session_state["dashboard_filters"] = {
         "project": projects, "environment": environments, "title": test_names,
         "client_id": client_ids, "validation_type": validation_types, "result_status": statuses,
@@ -174,7 +196,7 @@ if detail_key in indicator_data:
                         x=alt.X("Comparação:N", title="Cliente ou origem · execução · índice", axis=alt.Axis(labelAngle=-45)),
                         xOffset=alt.XOffset("Período:N", sort=["Ontem", "Hoje"]),
                         y=alt.Y("Valor:Q", title="Valor"),
-                        color=alt.Color("Período:N", scale=alt.Scale(domain=["Ontem", "Hoje"], range=["#6c757d", "#0d6efd"])),
+                        color=alt.Color("Período:N", scale=alt.Scale(domain=["Ontem", "Hoje"], range=["#709C99", "#2C6966"])),
                         tooltip=["Comparação:N", "Período:N", "Valor:Q", alt.Tooltip("direction:N", title="Direção"), "Variação:N"],
                     ), use_container_width=True)
                     st.dataframe(values[["scope_label", "index_name", "Execução", "direction", "previous_value", "current_value", "Variação"]].rename(columns={
@@ -251,7 +273,7 @@ with overview:
             else:
                 unique = details.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])
                 chart_data = unique.groupby("index_name").size().nlargest(5).reset_index(name="Clientes ou origens")
-                st.altair_chart(alt.Chart(chart_data).mark_bar(color="#dc3545").encode(
+                st.altair_chart(alt.Chart(chart_data).mark_bar(color="#D83026").encode(
                     x=alt.X("Clientes ou origens:Q", title="Clientes ou origens"),
                     y=alt.Y("index_name:N", title=None, sort="-x"),
                     tooltip=["index_name:N", "Clientes ou origens:Q"],
@@ -271,7 +293,7 @@ with overview:
         theta=alt.Theta("Quantidade:Q"),
         color=alt.Color("Resultado:N", scale=alt.Scale(
             domain=["Falhas", "Aprovadas", "Informativas"],
-            range=["#dc3545", "#198754", "#0d6efd"],
+            range=["#D83026", "#274E13", "#1972E8"],
         ), legend=alt.Legend(title="Resultado")),
         tooltip=["Resultado:N", "Quantidade:Q"],
     )
@@ -289,7 +311,7 @@ with overview:
         by_type = failures.groupby("validation_type", dropna=False).size().reset_index(name="Falhas")
         by_type["validation_type"] = by_type["validation_type"].fillna("Não informado")
         type_column.altair_chart(alt.Chart(by_type).mark_arc(outerRadius=120).encode(
-            theta=alt.Theta("Falhas:Q"), color=alt.Color("validation_type:N", title="Tipo"),
+            theta=alt.Theta("Falhas:Q"), color=alt.Color("validation_type:N", title="Tipo", scale=alt.Scale(range=["#2C6966", "#709C99", "#1972E8", "#4285F4", "#D83026", "#274E13", "#434343"])),
             tooltip=["validation_type:N", "Falhas:Q"],
         ), use_container_width=True)
 
@@ -299,7 +321,7 @@ with overview:
         st.info("Nenhuma falha de cliente encontrada nos filtros selecionados.")
     else:
         by_client = client_failures.groupby("client_id").size().nlargest(10).reset_index(name="Falhas")
-        st.altair_chart(alt.Chart(by_client).mark_bar(color="#dc3545").encode(
+        st.altair_chart(alt.Chart(by_client).mark_bar(color="#D83026").encode(
             x=alt.X("client_id:N", title="Cliente", sort="-y", axis=alt.Axis(labelAngle=-45)),
             y=alt.Y("Falhas:Q", title="Falhas"), tooltip=["client_id:N", "Falhas:Q"],
         ), use_container_width=True)
@@ -313,7 +335,7 @@ with overview:
     daily_failures["Dia"] = pd.to_datetime(daily_failures["started_at"], utc=True).dt.tz_convert(display_zone).dt.date
     daily = daily.merge(daily_failures.groupby("Dia").size().reset_index(name="Falhas"), on="Dia", how="left")
     daily["Falhas"] = daily["Falhas"].fillna(0).astype(int)
-    st.altair_chart(alt.Chart(daily).mark_line(point=True, color="#dc3545").encode(
+    st.altair_chart(alt.Chart(daily).mark_line(point=True, color="#D83026").encode(
         x=alt.X("Dia:T", title="Dia"), y=alt.Y("Falhas:Q", title="Falhas"),
         tooltip=["Dia:T", "Falhas:Q", "Execuções:Q"],
     ), use_container_width=True)
@@ -327,7 +349,7 @@ with overview:
         by_scenario["Resultado"] = by_scenario["result_status"].map(STATUS_LABELS).fillna("Não informado")
         st.altair_chart(alt.Chart(by_scenario).mark_bar().encode(
             x=alt.X("title:N", title="Cenário", sort="-y", axis=alt.Axis(labelAngle=-45)), y=alt.Y("Quantidade:Q", title="Validações"),
-            color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"])),
+            color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#D83026", "#274E13", "#1972E8"])),
             tooltip=["title:N", "Resultado:N", "Quantidade:Q"],
         ), use_container_width=True)
 
@@ -361,7 +383,7 @@ with indices_tab:
             st.markdown(f"**{family}**")
             st.altair_chart(alt.Chart(chart_data).mark_bar().encode(
                 x=alt.X("Resultado:N", title=None, sort=None), y=alt.Y("Quantidade:Q", title="Validações"),
-                color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#dc3545", "#198754", "#0d6efd"]), legend=None),
+                color=alt.Color("Resultado:N", scale=alt.Scale(domain=["Falha", "Aprovado", "Informativo"], range=["#D83026", "#274E13", "#1972E8"]), legend=None),
                 tooltip=["Resultado:N", "Quantidade:Q"],
             ).properties(height=160), use_container_width=True)
             if st.button(f"Ver falhas · {family}", key=f"index_failures_{family}"):
