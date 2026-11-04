@@ -4,10 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.services.client_validation_report import ClientValidationReport
-from src.services.report_database import parse_report, persist_session_reports
+from src.services.report_database import _oto_report_metadata, parse_report, persist_session_reports
 from src.validators.after_pipeline.product_data_validator import ProductDataValidator, _CategorizedMessages
 from src.validators.after_pipeline.historical_vulnerability_validator import HistoricalVulnerabilityValidator
 from src.validators.after_pipeline.oto_dashboard.asset_data_validator import OtoAssetDataValidator
+from src.config.settings import ClientTarget
+from src.services.opensearch_concurrency import validate_targets_on_product_opensearch
 
 
 def test_structured_totals_survive_report_and_insert(tmp_path, monkeypatch):
@@ -115,3 +117,59 @@ def test_oto_pair_comparison_preserves_metadata_until_database(tmp_path, monkeyp
         persist_session_reports(session, 1, "after", [path])
     rows = cursor.executemany.call_args.args[1]
     assert [row[11] for row in rows].count("asset_data.score") == 2
+
+
+def test_full_oto_client_execution_with_real_section_validator(tmp_path):
+    values = {field: 1.0 for field in ("no_monitored_vuln", "total", "no_monitored_events", "monitored_vuln", "monitored_events")}
+    current = {"_id": "t", "_source": {"@timestamp": "2026-11-04T10:00:00Z", "asset_data": values}}
+    previous = {"_id": "p", "_source": {"@timestamp": "2026-11-03T10:00:00Z", "asset_data": values}}
+    repository, cognito = MagicMock(), MagicMock()
+    cognito.get_client.return_value = {"client_type": "saas"}
+    repository.get_documents_by_date_match.side_effect = [[current], [previous]]
+    validator = ProductDataValidator(repository, cognito, date(2026, 11, 4))
+    validator._validate_mappings_for_documents = MagicMock()
+    results = validate_targets_on_product_opensearch([ClientTarget("acme")], lambda target: (target.client_id, *validator.validate_oto_dashboard(target)))
+    report = ClientValidationReport()
+    for client, errors, details in results:
+        report.add_client_result(client, failures=errors, details=details)
+    path = tmp_path / "test_should_validate_oto_dashboard_after_pipeline.txt"
+    report.write(path, "OTO", "BDD")
+    metadata = json.loads(path.with_suffix(".structured.json").read_text(encoding="utf-8"))
+    assert any(value["attribute_name"] == "asset_data.total" for value in metadata.values())
+
+
+def test_oto_fallback_recovers_explicit_pair_when_sidecar_is_empty(tmp_path, monkeypatch):
+    message = ("Índice 'acme_oto_dashboard' | hoje _id=abc (@timestamp=2026-11-04T11:50:28.940287) "
+               "e ontem _id=xyz (@timestamp=2026-11-03T11:49:24.472200) | Índice 'acme_oto_dashboard' "
+               "| seção **asset_data** | atributo **asset_data.monitored_events**: anterior=0.0, "
+               "mais recente=193.0, variação=não calculável; limites: +50%/-50%. "
+               "Erro: valor anterior é 0.0 e não permite calcular a diferença percentual.")
+    path = tmp_path / "test_should_validate_oto_dashboard_after_pipeline.txt"
+    path.write_text(f"Teste: OTO\nBDD:\nDado\nFalhas (1):\n- Cliente: acme\n  [Comparação percentual] {message}\n", encoding="utf-8")
+    path.with_suffix(".structured.json").write_text("{}", encoding="utf-8")
+    result = parse_report(path.read_text(encoding="utf-8"))["results"][0]
+    metadata = _oto_report_metadata(result)
+    assert metadata["index_type"] == "oto_dashboard"
+    assert metadata["attribute_name"] == "asset_data.monitored_events"
+    assert metadata["previous_value"] == 0 and metadata["current_value"] == 193
+    assert metadata["variation_percent"] is None
+    assert metadata["previous_date"] == date(2026, 11, 3)
+    assert metadata["current_date"] == date(2026, 11, 4)
+    assert metadata["reason_code"] == "PERCENTAGE_BASE_ZERO"
+    for key, value in {"REPORT_DB_ENABLED": "true", "REPORT_DB_HOST": "db", "REPORT_DB_DATABASE": "qa", "REPORT_DB_USER": "u", "REPORT_DB_PASSWORD": "p"}.items():
+        monkeypatch.setenv(key, value)
+    config = SimpleNamespace(_report_db_outcomes={}, getoption=lambda *args, **kwargs: False)
+    session = SimpleNamespace(config=config, _validation_started_at=0, _report_db_started_at=datetime.now(timezone.utc))
+    connection = MagicMock()
+    cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = (123,)
+    with patch("src.services.report_database.psycopg.connect", return_value=connection):
+        persist_session_reports(session, 1, "after", [path])
+    row = cursor.executemany.call_args.args[1][0]
+    assert row[9:15] == ("acme_oto_dashboard", "oto_dashboard", "asset_data.monitored_events", 0, 193, None)
+    assert row[19:22] == (date(2026, 11, 3), date(2026, 11, 4), "PERCENTAGE_BASE_ZERO")
+
+
+def test_oto_fallback_rejects_non_comparison_messages():
+    assert _oto_report_metadata({"message": "Índice 'acme_oto_dashboard' | seção **asset_data** ausente.", "status": "failed"}) == {}
+    assert _oto_report_metadata({"message": "Índice 'acme_oto_dashboard' | atributo **score**: current=1, past=2", "status": "passed"}) == {}
