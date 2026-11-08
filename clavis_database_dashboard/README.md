@@ -43,7 +43,12 @@ REPORT_DB_PASSWORD=preencha_localmente
 REPORT_DB_SCHEMA=qa_reports
 REPORT_DB_CONNECT_TIMEOUT=10
 DASHBOARD_TIMEZONE=America/Sao_Paulo
+DASHBOARD_SHOW_MAPPING_RESULTS=true
 ```
+
+`DASHBOARD_SHOW_MAPPING_RESULTS` controla a exibição dos cenários e resultados de
+validações de mapping. Use `true` para incluí-los ou `false` para removê-los dos
+filtros, indicadores, gráficos e detalhes. O padrão é `true`.
 
 As configurações identificam o mesmo banco e schema usados pelos testes com
 `REPORT_DB_*`. Aqui não é necessário configurar `REPORT_DB_ENABLED`: o dashboard

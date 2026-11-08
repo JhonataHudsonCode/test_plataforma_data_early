@@ -65,22 +65,49 @@ COLUMNS = [
 ]
 
 
+def mapping_results_enabled() -> bool:
+    """Retorna se resultados de validação de mapping devem ser exibidos."""
+    value = os.getenv("DASHBOARD_SHOW_MAPPING_RESULTS", "true").strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("DASHBOARD_SHOW_MAPPING_RESULTS deve ser true ou false.")
+
+
 def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
     """Carrega valores distintos para seleção antes da consulta de resultados."""
+    show_mapping = mapping_results_enabled()
+    scenario_filter = sql.SQL("") if show_mapping else sql.SQL("""
+        AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
+        AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
+    """)
+    result_filter = sql.SQL("") if show_mapping else sql.SQL("""
+        AND COALESCE(v.validation_type, '') NOT ILIKE '%mapping%'
+    """)
     query = sql.SQL("""
         SELECT DISTINCT 'project' AS kind, project AS value FROM {runs} WHERE project IS NOT NULL
         UNION ALL
         SELECT DISTINCT 'environment' AS kind, environment AS value FROM {runs} WHERE environment IS NOT NULL
         UNION ALL
-        SELECT DISTINCT 'title' AS kind, title AS value FROM {scenarios} WHERE title IS NOT NULL
+        SELECT DISTINCT 'title' AS kind, s.title AS value
+        FROM {scenarios} AS s WHERE s.title IS NOT NULL {scenario_filter}
         UNION ALL
-        SELECT DISTINCT 'client_id' AS kind, client_id AS value FROM {results} WHERE client_id IS NOT NULL
+        SELECT DISTINCT 'client_id' AS kind, v.client_id AS value
+        FROM {results} AS v
+        JOIN {scenarios} AS s ON s.id = v.scenario_id
+        WHERE v.client_id IS NOT NULL {scenario_filter} {result_filter}
         UNION ALL
-        SELECT DISTINCT 'validation_type' AS kind, validation_type AS value FROM {results} WHERE validation_type IS NOT NULL
+        SELECT DISTINCT 'validation_type' AS kind, v.validation_type AS value
+        FROM {results} AS v
+        JOIN {scenarios} AS s ON s.id = v.scenario_id
+        WHERE v.validation_type IS NOT NULL {scenario_filter} {result_filter}
     """).format(
         runs=sql.Identifier(settings.schema, "qa_test_runs"),
         scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"),
         results=sql.Identifier(settings.schema, "qa_test_results"),
+        scenario_filter=scenario_filter,
+        result_filter=result_filter,
     )
     options = {key: [] for key in ("project", "environment", "title", "client_id", "validation_type")}
     with psycopg.connect(
@@ -99,6 +126,22 @@ def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
 
 def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> pd.DataFrame:
     """Carrega uma linha por mensagem; preserva cenários sem mensagens."""
+    show_mapping = mapping_results_enabled()
+    scenario_filter = sql.SQL("") if show_mapping else sql.SQL("""
+        AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
+        AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
+    """)
+    result_filter = sql.SQL("") if show_mapping else sql.SQL("""
+        AND COALESCE(v.validation_type, '') NOT ILIKE '%mapping%'
+    """)
+    run_filter = sql.SQL("") if show_mapping else sql.SQL("""
+        AND EXISTS (
+            SELECT 1 FROM {scenarios} AS eligible
+            WHERE eligible.run_id = r.id
+              AND COALESCE(eligible.title, '') NOT ILIKE '%mapping%'
+              AND COALESCE(eligible.test_name, '') NOT ILIKE '%mapping%'
+        )
+    """).format(scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"))
     query = sql.SQL("""
         SELECT r.id AS run_id, r.project, r.environment, r.started_at, r.finished_at,
                r.duration_ms AS run_duration_ms, r.status AS run_status, r.exit_code,
@@ -111,14 +154,18 @@ def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> 
                v.comparison_limit_percent, v.max_increase_percent, v.max_decrease_percent,
                v.previous_date, v.comparison_current_date AS "current_date", v.reason_code
         FROM {runs} AS r
-        LEFT JOIN {scenarios} AS s ON s.run_id = r.id
-        LEFT JOIN {results} AS v ON v.scenario_id = s.id
+        LEFT JOIN {scenarios} AS s ON s.run_id = r.id {scenario_filter}
+        LEFT JOIN {results} AS v ON v.scenario_id = s.id {result_filter}
         WHERE r.started_at >= %s AND r.started_at < %s
+        {run_filter}
         ORDER BY r.started_at DESC, s.id, v.sequence
     """).format(
         runs=sql.Identifier(settings.schema, "qa_test_runs"),
         scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"),
         results=sql.Identifier(settings.schema, "qa_test_results"),
+        scenario_filter=scenario_filter,
+        result_filter=result_filter,
+        run_filter=run_filter,
     )
     with psycopg.connect(
         host=settings.host, port=settings.port, dbname=settings.database,

@@ -187,6 +187,76 @@ def run_duration_summary(frame: pd.DataFrame) -> pd.DataFrame:
     return runs.sort_values("started_at", ascending=False)
 
 
+def daily_failure_history(frame: pd.DataFrame, display_zone) -> pd.DataFrame:
+    """Conta validações distintas com falha em cada dia de execução.
+
+    Inclui dias com execução e zero falhas para o gráfico mostrar a série completa.
+    A contagem segue a mesma granularidade dos indicadores gerais.
+    """
+    columns = ["execution_day", "failures", "runs"]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    runs = frame.loc[frame["run_id"].notna(), ["run_id", "started_at"]].drop_duplicates("run_id").copy()
+    runs["execution_day"] = (
+        pd.to_datetime(runs["started_at"], utc=True, errors="coerce")
+        .dt.tz_convert(display_zone)
+        .dt.date
+    )
+    runs = runs.dropna(subset=["execution_day"])
+    if runs.empty:
+        return pd.DataFrame(columns=columns)
+    daily_runs = runs.groupby("execution_day").size().rename("runs")
+
+    messages = frame.loc[
+        frame["result_id"].notna() & frame["result_status"].eq("failed")
+    ].drop_duplicates(
+        subset=["run_id", "scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
+    ).copy()
+    if not messages.empty:
+        messages["execution_day"] = (
+            pd.to_datetime(messages["started_at"], utc=True, errors="coerce")
+            .dt.tz_convert(display_zone)
+            .dt.date
+        )
+        daily_failures = messages.dropna(subset=["execution_day"]).groupby("execution_day").size().rename("failures")
+    else:
+        daily_failures = pd.Series(dtype="int64", name="failures")
+    history = pd.concat([daily_runs, daily_failures], axis=1).fillna(0).reset_index()
+    history[["failures", "runs"]] = history[["failures", "runs"]].astype(int)
+    return history[columns].sort_values("execution_day")
+
+
+def client_validation_history(frame: pd.DataFrame, client_id: str, display_zone) -> pd.DataFrame:
+    """Conta resultados aprovados e com falha por dia para um cliente."""
+    columns = ["execution_day", "result_status", "validations"]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    messages = frame.loc[
+        frame["result_id"].notna()
+        & frame["scope_type"].eq("client")
+        & frame["client_id"].astype("string").eq(str(client_id))
+        & frame["result_status"].isin(["failed", "passed"])
+    ].drop_duplicates(
+        subset=["run_id", "scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
+    ).copy()
+    if messages.empty:
+        return pd.DataFrame(columns=columns)
+    messages["execution_day"] = (
+        pd.to_datetime(messages["started_at"], utc=True, errors="coerce")
+        .dt.tz_convert(display_zone)
+        .dt.date
+    )
+    return (
+        messages.dropna(subset=["execution_day"])
+        .groupby(["execution_day", "result_status"])
+        .size()
+        .rename("validations")
+        .reset_index()
+        .sort_values("execution_day")
+    )
+
+
 def format_duration(value) -> str:
     if pd.isna(value):
         return "Não informada"

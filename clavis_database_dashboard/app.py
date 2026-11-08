@@ -11,22 +11,26 @@ import psycopg
 import streamlit as st
 
 from src.analysis import (SCENARIO_LABELS, STATUS_LABELS, apply_filters, count_affected_indexes,
-                          empty_index_date_details, format_duration, index_results, missing_document_details,
+                          client_validation_history, daily_failure_history, empty_index_date_details,
+                          format_duration, index_results, missing_document_details,
                           missing_index_details, percentage_attribute_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
-from src.database import DatabaseSettings, load_filter_options, load_results
+from src.database import DatabaseSettings, load_filter_options, load_results, mapping_results_enabled
 
 
 st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
 st.markdown(
     """<style>
     [data-testid="stAppDeployButton"] { display: none !important; }
-    [data-testid="stAppViewContainer"], [data-testid="stSidebar"] { background: #FFFFFF; color: #1E2123; }
-    [data-testid="stSidebar"] { border-color: #709C99; }
+    [data-testid="stAppViewContainer"] { background: #F5F8F7; color: #1E2123; }
+    [data-testid="stSidebar"] { background: #FFFFFF; border-right: 1px solid #DCE7E5; color: #1E2123; }
     h1, h2, h3 { color: #2C6966; }
-    [data-testid="stMetric"] { border-color: #709C99; }
+    [data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #DCE7E5; border-radius: 14px; padding: 16px 18px; box-shadow: 0 3px 12px rgba(44, 105, 102, .06); }
     [data-testid="stMetricValue"] { color: #1972E8; }
     [data-baseweb="tab"][aria-selected="true"] { color: #2C6966; }
-    [data-testid="stExpander"] { border-color: #709C99; }
+    [data-testid="stExpander"] { background: #FFFFFF; border: 1px solid #DCE7E5; border-radius: 12px; }
+    [data-testid="stButton"] > button { border-radius: 10px; border: 1px solid #709C99; transition: all .15s ease; }
+    [data-testid="stButton"] > button:hover { border-color: #2C6966; color: #2C6966; box-shadow: 0 3px 10px rgba(44, 105, 102, .12); }
+    [data-testid="stDataFrame"] { border: 1px solid #DCE7E5; border-radius: 12px; overflow: hidden; }
     </style>""",
     unsafe_allow_html=True,
 )
@@ -36,6 +40,7 @@ st.caption("Resultados persistidos pelo Early e After no PostgreSQL")
 try:
     settings = DatabaseSettings.from_env()
     display_zone = ZoneInfo(os.getenv("DASHBOARD_TIMEZONE", "America/Sao_Paulo"))
+    show_mapping_results = mapping_results_enabled()
 except (ValueError, ZoneInfoNotFoundError) as error:
     st.error(f"Configuração inválida: {error}")
     st.info("Crie o arquivo .env e configure a conexão conforme o README do projeto.")
@@ -43,6 +48,21 @@ except (ValueError, ZoneInfoNotFoundError) as error:
 
 today = datetime.now(display_zone).date()
 data = st.session_state.get("dashboard_data")
+
+
+def without_mapping_results(frame: pd.DataFrame) -> pd.DataFrame:
+    """Remove testes e resultados de mapping antes de calcular qualquer indicador."""
+    if frame.empty:
+        return frame
+    mapping_rows = pd.Series(False, index=frame.index)
+    for column in ("title", "test_name", "validation_type"):
+        if column in frame:
+            mapping_rows |= frame[column].fillna("").astype(str).str.contains("mapping", case=False, regex=False)
+    return frame.loc[~mapping_rows].copy()
+
+
+if not show_mapping_results and data is not None:
+    data = without_mapping_results(data)
 
 if "dashboard_filter_options" not in st.session_state:
     try:
@@ -54,9 +74,28 @@ if "dashboard_filter_options" not in st.session_state:
             st.rerun()
         st.stop()
 
+if not show_mapping_results:
+    st.session_state["selected_scenarios"] = [
+        value for value in st.session_state.get("selected_scenarios", [])
+        if "mapping" not in str(value).casefold()
+    ]
+    existing_filters = st.session_state.get("dashboard_filters")
+    if existing_filters:
+        for key in ("title", "validation_type"):
+            existing_filters[key] = [
+                value for value in existing_filters.get(key, [])
+                if "mapping" not in str(value).casefold()
+            ]
+        st.session_state["dashboard_filters"] = existing_filters
+
+    st.caption("Validações e resultados de testes de mapping ocultos por DASHBOARD_SHOW_MAPPING_RESULTS=false.")
+
 
 def choices(column: str) -> list[str]:
-    return st.session_state["dashboard_filter_options"].get(column, [])
+    values = st.session_state["dashboard_filter_options"].get(column, [])
+    if not show_mapping_results and column in {"title", "validation_type"}:
+        values = [value for value in values if "mapping" not in str(value).casefold()]
+    return values
 
 
 def close_scenario_dialog() -> None:
@@ -230,6 +269,53 @@ if selected_index is not None:
                     st.write(f"{started} · {item['project']} / {item['environment']} · {item['title']} · {item['index_name']} · [{item['validation_type']}] {item['message']}")
     st.stop()
 
+if st.session_state.get("failure_history_detail"):
+    st.subheader("Histórico de validações por cliente")
+    if st.button("← Voltar à visão geral"):
+        st.session_state.pop("failure_history_detail", None)
+        st.rerun()
+    client_rows = filtered[
+        filtered["result_id"].notna()
+        & filtered["scope_type"].eq("client")
+        & filtered["client_id"].notna()
+        & filtered["result_status"].isin(["failed", "passed"])
+    ]
+    client_options = sorted(client_rows["client_id"].astype(str).unique(), key=str.casefold)
+    if not client_options:
+        st.info("Não há resultados aprovados ou com falha por cliente nos filtros selecionados.")
+    else:
+        selected_client = st.selectbox("Cliente", client_options, key="history_client")
+        history = client_validation_history(filtered, selected_client, display_zone)
+        if history.empty:
+            st.info("Não há histórico de validações para este cliente no período selecionado.")
+        else:
+            history["Resultado"] = history["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
+            client_chart = alt.Chart(history).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5, size=22).encode(
+                    x=alt.X("execution_day:T", title="Dia da execução", axis=alt.Axis(format="%d/%m/%Y", labelAngle=-35)),
+                    xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
+                    y=alt.Y("validations:Q", title="Quantidade de validações", scale=alt.Scale(domainMin=0)),
+                    color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
+                        domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
+                    )),
+                    tooltip=[
+                        alt.Tooltip("execution_day:T", title="Dia", format="%d/%m/%Y"),
+                        alt.Tooltip("Resultado:N"), alt.Tooltip("validations:Q", title="Validações"),
+                    ],
+                )
+            st.altair_chart(
+                client_chart.properties(height=360).configure(background="#111827").configure_view(stroke=None).configure_axis(
+                    gridColor="#263244", domainColor="#475569", tickColor="#475569",
+                    labelColor="#CBD5E1", titleColor="#E2E8F0",
+                ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
+                use_container_width=True,
+            )
+            chart_table = history[["execution_day", "Resultado", "validations"]].rename(columns={
+                "execution_day": "Dia", "validations": "Validações",
+            })
+            chart_table["Dia"] = pd.to_datetime(chart_table["Dia"]).dt.strftime("%d/%m/%Y")
+            st.dataframe(chart_table, hide_index=True, use_container_width=True)
+    st.stop()
+
 tab_options = {}
 if st.session_state.pop("return_to_indices", False) and "default" in inspect.signature(st.tabs).parameters:
     tab_options["default"] = "Índices"
@@ -327,19 +413,59 @@ with overview:
         ), use_container_width=True)
         st.caption("Os 10 clientes com mais falhas no período filtrado.")
 
-    st.subheader("Evolução das falhas por dia")
-    daily_runs = filtered[["run_id", "started_at"]].drop_duplicates("run_id").copy()
-    daily_runs["Dia"] = pd.to_datetime(daily_runs["started_at"], utc=True).dt.tz_convert(display_zone).dt.date
-    daily = daily_runs.groupby("Dia").size().reset_index(name="Execuções")
-    daily_failures = failures.copy()
-    daily_failures["Dia"] = pd.to_datetime(daily_failures["started_at"], utc=True).dt.tz_convert(display_zone).dt.date
-    daily = daily.merge(daily_failures.groupby("Dia").size().reset_index(name="Falhas"), on="Dia", how="left")
-    daily["Falhas"] = daily["Falhas"].fillna(0).astype(int)
-    st.altair_chart(alt.Chart(daily).mark_line(point=True, color="#D83026").encode(
-        x=alt.X("Dia:T", title="Dia"), y=alt.Y("Falhas:Q", title="Falhas"),
-        tooltip=["Dia:T", "Falhas:Q", "Execuções:Q"],
-    ), use_container_width=True)
-    st.caption("As execuções por dia aparecem ao passar o mouse; mais execuções podem resultar em mais falhas.")
+    st.subheader("Histórico geral de falhas")
+    daily = daily_failure_history(filtered, display_zone)
+    if daily.empty:
+        st.info("Não há execuções no período para compor o histórico.")
+    else:
+        daily = daily.sort_values("execution_day").copy()
+        daily["open_failures"] = daily["failures"].shift(1).fillna(daily["failures"])
+        daily["close_failures"] = daily["failures"]
+        daily["candle_low"] = daily[["open_failures", "close_failures"]].min(axis=1)
+        daily["candle_high"] = daily[["open_failures", "close_failures"]].max(axis=1)
+        daily["direction"] = "Sem variação"
+        daily.loc[daily["close_failures"] > daily["open_failures"], "direction"] = "Falhas aumentaram"
+        daily.loc[daily["close_failures"] < daily["open_failures"], "direction"] = "Falhas diminuíram"
+        x_axis = alt.X("execution_day:T", title="Dia da execução", axis=alt.Axis(format="%d/%m/%Y", labelAngle=-35))
+        candle_color = alt.Color("direction:N", title="Variação diária", scale=alt.Scale(
+            domain=["Falhas aumentaram", "Falhas diminuíram", "Sem variação"],
+            range=["#F45B69", "#00C087", "#94A3B8"],
+        ), legend=alt.Legend(orient="top"))
+        tooltip = [
+            alt.Tooltip("execution_day:T", title="Dia", format="%d/%m/%Y"),
+            alt.Tooltip("open_failures:Q", title="Falhas no dia anterior"),
+            alt.Tooltip("close_failures:Q", title="Falhas no dia"),
+            alt.Tooltip("runs:Q", title="Execuções"), alt.Tooltip("direction:N", title="Variação"),
+        ]
+        wick = alt.Chart(daily).mark_rule(strokeWidth=2).encode(
+            x=x_axis,
+            y=alt.Y("candle_low:Q", title="Quantidade de falhas", scale=alt.Scale(domainMin=0)),
+            y2="candle_high:Q", color=candle_color, tooltip=tooltip,
+        )
+        body = alt.Chart(daily[daily["candle_low"] != daily["candle_high"]]).mark_bar(
+            size=18, cornerRadius=3,
+        ).encode(
+            x=x_axis,
+            y=alt.Y("candle_low:Q", scale=alt.Scale(domainMin=0)), y2="candle_high:Q",
+            color=candle_color, tooltip=tooltip,
+        )
+        doji = alt.Chart(daily[daily["candle_low"] == daily["candle_high"]]).mark_tick(
+            orient="horizontal", size=18, thickness=3,
+        ).encode(
+            x=x_axis, y=alt.Y("close_failures:Q", scale=alt.Scale(domainMin=0)),
+            color=candle_color, tooltip=tooltip,
+        )
+        st.altair_chart(
+            (wick + body + doji).properties(height=340).configure(background="#111827").configure_view(stroke=None).configure_axis(
+                gridColor="#263244", domainColor="#475569", tickColor="#475569",
+                labelColor="#CBD5E1", titleColor="#E2E8F0",
+            ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
+            use_container_width=True,
+        )
+        if st.button("Detalhar histórico de sucessos e falhas por cliente", type="secondary"):
+            st.session_state["failure_history_detail"] = True
+            st.rerun()
+    st.caption("Estilo candle: abertura = falhas do dia anterior; fechamento = falhas do dia. Vermelho indica aumento e verde, redução. Horários não são exibidos.")
 
     st.subheader("Validações por cenário")
     if stages.empty:
