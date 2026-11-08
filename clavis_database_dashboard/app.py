@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import inspect
 from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
@@ -36,6 +37,7 @@ alt.themes.enable("clavis_dark")
 
 
 st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "clavis_dashboard_logo.png"
 st.markdown(
     """<style>
     :root {
@@ -132,6 +134,7 @@ def set_filter_date(widget_key: str, selected_date) -> None:
 def load_initial_week() -> None:
     start_date = st.session_state["filter_start_date"]
     end_date = st.session_state["filter_end_date"]
+    st.image(str(LOGO_PATH), use_container_width=True)
     st.write("Na primeira abertura, carregamos os dados da semana atual para preparar a visão geral.")
     st.caption(f"Período: {start_date:%d/%m/%Y} a {end_date:%d/%m/%Y}")
     try:
@@ -224,6 +227,8 @@ def select_scenarios() -> None:
 
 
 with st.sidebar:
+    st.image(str(LOGO_PATH), use_container_width=True)
+    st.divider()
     st.header("Filtros")
     with st.container():
         start_date = st.date_input("Data inicial", key="filter_start_date")
@@ -338,29 +343,49 @@ def render_daily_history(frame: pd.DataFrame, title: str, chart_key: str) -> Non
         history["day_label"] = pd.to_datetime(history["execution_day"]).dt.strftime("%d/%m/%Y")
         day_order = history["day_label"].drop_duplicates().tolist()
         history["Resultado"] = history["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
-        chart = alt.Chart(history).mark_bar(
-            cornerRadiusTopLeft=5,
-            cornerRadiusTopRight=5,
-            size=22,
-        ).encode(
-            x=alt.X("day_label:O", title="Dia da execução", sort=day_order,
-                    axis=alt.Axis(labelAngle=-35, labelOverlap=False)),
-            xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
-            y=alt.Y("validations:Q", title="Quantidade de validações", scale=alt.Scale(domainMin=0)),
-            color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
-                domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
-            )),
+        colors = alt.Scale(
+            domain=["Falhas", "Aprovadas"],
+            range=["#F45B69", "#00C087"],
+        )
+        x = alt.X(
+            "day_label:O", title="Dia da execução", sort=day_order,
+            axis=alt.Axis(labelAngle=-30, labelOverlap=True, tickSize=0, domain=False),
+        )
+        y = alt.Y(
+            "validations:Q", title="Quantidade de validações",
+            scale=alt.Scale(domainMin=0), stack=None,
+        )
+        base = alt.Chart(history).encode(
+            x=x,
+            y=y,
+            color=alt.Color("Resultado:N", title=None, scale=colors),
+            detail=alt.Detail("Resultado:N"),
             tooltip=[
                 alt.Tooltip("day_label:N", title="Dia"),
                 alt.Tooltip("Resultado:N"),
                 alt.Tooltip("validations:Q", title="Validações"),
             ],
         )
+        glow = base.mark_line(interpolate="monotone", strokeWidth=9, opacity=0.12)
+        line = base.mark_line(interpolate="monotone", strokeWidth=2.8)
+        halo = base.mark_point(filled=True, size=260, opacity=0.11)
+        points = base.mark_point(
+            filled=True, size=72, stroke="#0B1220", strokeWidth=1.5,
+        )
+        chart = glow + line + halo + points
         st.altair_chart(
-            chart.properties(height=270).configure(background="#111827").configure_view(stroke=None).configure_axis(
-                gridColor="#263244", domainColor="#475569", tickColor="#475569",
+            chart.properties(height=290, padding={"left": 8, "right": 16, "top": 10, "bottom": 4})
+            .configure(background="#111827")
+            .configure_view(stroke="#263244", strokeWidth=1)
+            .configure_axis(
+                gridColor="#263244", gridOpacity=0.42, domain=False, tickSize=0,
+                labelColor="#CBD5E1", titleColor="#94A3B8", labelFontSize=11,
+                titleFontSize=11,
+            )
+            .configure_legend(
+                orient="top", direction="horizontal", symbolType="circle",
                 labelColor="#CBD5E1", titleColor="#E2E8F0",
-            ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
+            ),
             use_container_width=True,
             key=chart_key,
         )
@@ -529,12 +554,12 @@ with overview:
             "count_label": "índices afetados",
         },
         "percentage": {
-            "kicker": "02 / Variação dos dados", "icon": "↗", "accent": "#70C1B9",
+            "kicker": "02 / Variação dos dados", "icon": "↗", "accent": "#F45B69",
             "description": "Índices com valores fora da variação percentual permitida.",
             "count_label": "índices com falha",
         },
         "missing_document": {
-            "kicker": "03 / Cobertura da ingestão", "icon": "◌", "accent": "#B6D7A8",
+            "kicker": "03 / Cobertura da ingestão", "icon": "◌", "accent": "#D83026",
             "description": "Índices sem documentos nas datas recentes verificadas.",
             "count_label": "índices afetados",
         },
