@@ -338,6 +338,68 @@ with overview:
     row[1].metric("Cenários distintos", metrics["scenarios"])
     row[2].metric("Clientes distintos", metrics["clients"])
     st.caption("Cenários são contados por projeto e nome do teste; clientes, pelo identificador, sem duplicação entre execuções.")
+    st.subheader("Histórico geral de falhas")
+    daily = daily_failure_history(filtered, display_zone)
+    if daily.empty:
+        st.info("Não há execuções no período para compor o histórico.")
+    else:
+        daily = daily.groupby("execution_day", as_index=False).agg(
+            failures=("failures", "sum"), runs=("runs", "sum"),
+        ).sort_values("execution_day")
+        daily["day_label"] = pd.to_datetime(daily["execution_day"]).dt.strftime("%d/%m/%Y")
+        daily["open_failures"] = daily["failures"].shift(1).fillna(daily["failures"])
+        daily["close_failures"] = daily["failures"]
+        daily["candle_low"] = daily[["open_failures", "close_failures"]].min(axis=1)
+        daily["candle_high"] = daily[["open_failures", "close_failures"]].max(axis=1)
+        daily["direction"] = "Sem variação"
+        daily.loc[daily["close_failures"] > daily["open_failures"], "direction"] = "Falhas aumentaram"
+        daily.loc[daily["close_failures"] < daily["open_failures"], "direction"] = "Falhas diminuíram"
+        day_order = daily["day_label"].tolist()
+        x_axis = alt.X(
+            "day_label:O", title="Dia da execu\u00e7\u00e3o", sort=day_order,
+            axis=alt.Axis(labelAngle=-35, labelOverlap=False),
+        )
+        candle_color = alt.Color("direction:N", title="Variação diária", scale=alt.Scale(
+            domain=["Falhas aumentaram", "Falhas diminuíram", "Sem variação"],
+            range=["#F45B69", "#00C087", "#94A3B8"],
+        ), legend=alt.Legend(orient="top"))
+        tooltip = [
+            alt.Tooltip("day_label:N", title="Dia"),
+            alt.Tooltip("open_failures:Q", title="Falhas no dia anterior"),
+            alt.Tooltip("close_failures:Q", title="Falhas no dia"),
+            alt.Tooltip("runs:Q", title="Execuções"), alt.Tooltip("direction:N", title="Variação"),
+        ]
+        wick = alt.Chart(daily).mark_rule(strokeWidth=2).encode(
+            x=x_axis,
+            y=alt.Y("candle_low:Q", title="Quantidade de falhas", scale=alt.Scale(domainMin=0)),
+            y2="candle_high:Q", color=candle_color, tooltip=tooltip,
+        )
+        body = alt.Chart(daily[daily["candle_low"] != daily["candle_high"]]).mark_bar(
+            size=18, cornerRadius=3,
+        ).encode(
+            x=x_axis,
+            y=alt.Y("candle_low:Q", scale=alt.Scale(domainMin=0)), y2="candle_high:Q",
+            color=candle_color, tooltip=tooltip,
+        )
+        doji = alt.Chart(daily[daily["candle_low"] == daily["candle_high"]]).mark_tick(
+            orient="horizontal", size=18, thickness=3,
+        ).encode(
+            x=x_axis, y=alt.Y("close_failures:Q", scale=alt.Scale(domainMin=0)),
+            color=candle_color, tooltip=tooltip,
+        )
+        st.altair_chart(
+            (wick + body + doji).properties(height=340).configure(background="#111827").configure_view(stroke=None).configure_axis(
+                gridColor="#263244", domainColor="#475569", tickColor="#475569",
+                labelColor="#CBD5E1", titleColor="#E2E8F0",
+            ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
+            use_container_width=True,
+        )
+        if st.button("Detalhar histórico de sucessos e falhas por cliente", type="secondary"):
+            st.session_state["failure_history_detail"] = True
+            st.rerun()
+    st.caption("Estilo candle: abertura = falhas do dia anterior; fechamento = falhas do dia. Vermelho indica aumento e verde, redução. Horários não são exibidos.")
+
+
     st.subheader("Duração da bateria completa por projeto")
     run_filters = {key: st.session_state["dashboard_filters"].get(key, []) for key in ("project", "environment")}
     runs = run_duration_summary(apply_filters(data, run_filters))
@@ -422,60 +484,6 @@ with overview:
             y=alt.Y("Falhas:Q", title="Falhas"), tooltip=["client_id:N", "Falhas:Q"],
         ), use_container_width=True)
         st.caption("Os 10 clientes com mais falhas no período filtrado.")
-
-    st.subheader("Histórico geral de falhas")
-    daily = daily_failure_history(filtered, display_zone)
-    if daily.empty:
-        st.info("Não há execuções no período para compor o histórico.")
-    else:
-        daily = daily.sort_values("execution_day").copy()
-        daily["open_failures"] = daily["failures"].shift(1).fillna(daily["failures"])
-        daily["close_failures"] = daily["failures"]
-        daily["candle_low"] = daily[["open_failures", "close_failures"]].min(axis=1)
-        daily["candle_high"] = daily[["open_failures", "close_failures"]].max(axis=1)
-        daily["direction"] = "Sem variação"
-        daily.loc[daily["close_failures"] > daily["open_failures"], "direction"] = "Falhas aumentaram"
-        daily.loc[daily["close_failures"] < daily["open_failures"], "direction"] = "Falhas diminuíram"
-        x_axis = alt.X("execution_day:T", title="Dia da execução", axis=alt.Axis(format="%d/%m/%Y", labelAngle=-35))
-        candle_color = alt.Color("direction:N", title="Variação diária", scale=alt.Scale(
-            domain=["Falhas aumentaram", "Falhas diminuíram", "Sem variação"],
-            range=["#F45B69", "#00C087", "#94A3B8"],
-        ), legend=alt.Legend(orient="top"))
-        tooltip = [
-            alt.Tooltip("execution_day:T", title="Dia", format="%d/%m/%Y"),
-            alt.Tooltip("open_failures:Q", title="Falhas no dia anterior"),
-            alt.Tooltip("close_failures:Q", title="Falhas no dia"),
-            alt.Tooltip("runs:Q", title="Execuções"), alt.Tooltip("direction:N", title="Variação"),
-        ]
-        wick = alt.Chart(daily).mark_rule(strokeWidth=2).encode(
-            x=x_axis,
-            y=alt.Y("candle_low:Q", title="Quantidade de falhas", scale=alt.Scale(domainMin=0)),
-            y2="candle_high:Q", color=candle_color, tooltip=tooltip,
-        )
-        body = alt.Chart(daily[daily["candle_low"] != daily["candle_high"]]).mark_bar(
-            size=18, cornerRadius=3,
-        ).encode(
-            x=x_axis,
-            y=alt.Y("candle_low:Q", scale=alt.Scale(domainMin=0)), y2="candle_high:Q",
-            color=candle_color, tooltip=tooltip,
-        )
-        doji = alt.Chart(daily[daily["candle_low"] == daily["candle_high"]]).mark_tick(
-            orient="horizontal", size=18, thickness=3,
-        ).encode(
-            x=x_axis, y=alt.Y("close_failures:Q", scale=alt.Scale(domainMin=0)),
-            color=candle_color, tooltip=tooltip,
-        )
-        st.altair_chart(
-            (wick + body + doji).properties(height=340).configure(background="#111827").configure_view(stroke=None).configure_axis(
-                gridColor="#263244", domainColor="#475569", tickColor="#475569",
-                labelColor="#CBD5E1", titleColor="#E2E8F0",
-            ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
-            use_container_width=True,
-        )
-        if st.button("Detalhar histórico de sucessos e falhas por cliente", type="secondary"):
-            st.session_state["failure_history_detail"] = True
-            st.rerun()
-    st.caption("Estilo candle: abertura = falhas do dia anterior; fechamento = falhas do dia. Vermelho indica aumento e verde, redução. Horários não são exibidos.")
 
     st.subheader("Validações por cenário")
     if stages.empty:
