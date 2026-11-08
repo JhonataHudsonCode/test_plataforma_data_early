@@ -53,7 +53,7 @@ def missing_index_details(frame: pd.DataFrame, *, deduplicate: bool = True) -> p
 
 def percentage_failure_details(frame: pd.DataFrame) -> pd.DataFrame:
     """Retorna mensagens de falha classificadas como comparação percentual."""
-    results = index_results(frame)
+    results = frame if "index_family" in frame.columns else index_results(frame)
     category = results["validation_type"].fillna("").astype(str)
     return results[(results["result_status"] == "failed") & category.str.contains(
         r"percentual|porcentagem", case=False, regex=True,
@@ -101,7 +101,7 @@ def percentage_attribute_details(frame: pd.DataFrame) -> pd.DataFrame:
 
 def missing_document_details(frame: pd.DataFrame) -> pd.DataFrame:
     """Retorna ausências de documentos explicitamente informadas no relatório."""
-    results = index_results(frame)
+    results = frame if "index_family" in frame.columns else index_results(frame)
     messages = results["message"].fillna("").astype(str)
     failed_empty = (results["result_status"] == "failed") & messages.str.contains(_NO_DOCUMENTS, na=False)
     zero_dates = messages.map(lambda message: bool(_EMPTY_DATE.search(message) or _EMPTY_SECOND_DATE.search(message))).astype(bool)
