@@ -14,23 +14,27 @@ from src.analysis import (SCENARIO_LABELS, STATUS_LABELS, apply_filters, count_a
                           client_validation_history, daily_failure_history, empty_index_date_details,
                           format_duration, index_results, missing_document_details,
                           missing_index_details, percentage_attribute_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
-from src.database import DatabaseSettings, load_filter_options, load_results, mapping_results_enabled
+from src.database import (DatabaseSettings, clear_database_cache, load_filter_options,
+                          load_results, mapping_results_enabled)
 
 
 st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
 st.markdown(
     """<style>
     [data-testid="stAppDeployButton"] { display: none !important; }
-    [data-testid="stAppViewContainer"] { background: #F5F8F7; color: #1E2123; }
-    [data-testid="stSidebar"] { background: #FFFFFF; border-right: 1px solid #DCE7E5; color: #1E2123; }
-    h1, h2, h3 { color: #2C6966; }
-    [data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #DCE7E5; border-radius: 14px; padding: 16px 18px; box-shadow: 0 3px 12px rgba(44, 105, 102, .06); }
-    [data-testid="stMetricValue"] { color: #1972E8; }
-    [data-baseweb="tab"][aria-selected="true"] { color: #2C6966; }
-    [data-testid="stExpander"] { background: #FFFFFF; border: 1px solid #DCE7E5; border-radius: 12px; }
-    [data-testid="stButton"] > button { border-radius: 10px; border: 1px solid #709C99; transition: all .15s ease; }
-    [data-testid="stButton"] > button:hover { border-color: #2C6966; color: #2C6966; box-shadow: 0 3px 10px rgba(44, 105, 102, .12); }
-    [data-testid="stDataFrame"] { border: 1px solid #DCE7E5; border-radius: 12px; overflow: hidden; }
+    [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] { background: #0B1220; color: #E2E8F0; }
+    [data-testid="stSidebar"] { background: #111827; border-right: 1px solid #263244; color: #E2E8F0; }
+    [data-testid="stMarkdownContainer"], [data-testid="stWidgetLabel"] { color: #CBD5E1; }
+    h1, h2, h3 { color: #B6D7A8; }
+    [data-testid="stMetric"] { background: #111827; border: 1px solid #263244; border-radius: 14px; padding: 16px 18px; box-shadow: 0 4px 16px rgba(0, 0, 0, .18); }
+    [data-testid="stMetricLabel"] { color: #94A3B8; }
+    [data-testid="stMetricValue"] { color: #70C1B9; }
+    [data-baseweb="tab"][aria-selected="true"] { color: #70C1B9; }
+    [data-testid="stExpander"] { background: #111827; border: 1px solid #263244; border-radius: 12px; }
+    [data-testid="stButton"] > button { background: #111827; color: #E2E8F0; border-radius: 10px; border: 1px solid #334155; transition: all .15s ease; }
+    [data-testid="stButton"] > button:hover { border-color: #70C1B9; color: #70C1B9; box-shadow: 0 3px 10px rgba(0, 192, 135, .12); }
+    [data-testid="stDataFrame"] { border: 1px solid #263244; border-radius: 12px; overflow: hidden; }
+    [data-baseweb="select"] > div, [data-baseweb="input"] > div { background: #0B1220; border-color: #334155; }
     </style>""",
     unsafe_allow_html=True,
 )
@@ -145,6 +149,12 @@ with st.sidebar:
         )
         button_area = st.empty()
         submitted = button_area.button("Pesquisar", type="primary")
+        if st.button("Atualizar do banco", use_container_width=True, help="Ignora o cache atual e busca dados atualizados no PostgreSQL."):
+            clear_database_cache()
+            st.session_state.pop("dashboard_filter_options", None)
+            st.session_state["force_refresh_search"] = True
+            st.rerun()
+        submitted = submitted or st.session_state.pop("force_refresh_search", False)
         search_error = False
         if submitted and start_date <= end_date:
             button_area.button("⏳ Pesquisando...", type="primary", disabled=True)

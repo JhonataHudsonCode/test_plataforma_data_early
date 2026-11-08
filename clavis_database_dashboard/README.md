@@ -96,3 +96,5 @@ python -m pytest -q
 ```
 
 Os testes de análise usam dados fictícios e não acessam o PostgreSQL.
+
+As consultas de resultados e opções dos filtros usam o cache nativo do Streamlit por 15 minutos. Buscas repetidas com a mesma conexão e intervalo reutilizam os dados nesse período. Use **Atualizar do banco** para limpar o cache e forçar uma nova leitura do PostgreSQL. O cache fica no servidor da aplicação, não no navegador.

@@ -7,6 +7,7 @@ from datetime import datetime
 
 import pandas as pd
 import psycopg
+import streamlit as st
 from dotenv import load_dotenv
 from psycopg import sql
 from psycopg.rows import dict_row
@@ -75,9 +76,9 @@ def mapping_results_enabled() -> bool:
     raise ValueError("DASHBOARD_SHOW_MAPPING_RESULTS deve ser true ou false.")
 
 
-def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
-    """Carrega valores distintos para seleção antes da consulta de resultados."""
-    show_mapping = mapping_results_enabled()
+@st.cache_data(ttl=900, max_entries=16, show_spinner=False)
+def _load_filter_options_cached(settings: DatabaseSettings, show_mapping: bool) -> dict[str, list[str]]:
+    """Cache de 15 minutos das opções, separado pela flag de mapping."""
     scenario_filter = sql.SQL("") if show_mapping else sql.SQL("""
         AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
         AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
@@ -124,9 +125,14 @@ def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
     return {key: sorted(set(values), key=str.casefold) for key, values in options.items()}
 
 
-def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> pd.DataFrame:
-    """Carrega uma linha por mensagem; preserva cenários sem mensagens."""
-    show_mapping = mapping_results_enabled()
+def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
+    """Carrega opções dos filtros reutilizando cache de 15 minutos."""
+    return _load_filter_options_cached(settings, mapping_results_enabled())
+
+
+@st.cache_data(ttl=900, max_entries=8, show_spinner=False)
+def _load_results_cached(settings: DatabaseSettings, start: datetime, end: datetime, show_mapping: bool) -> pd.DataFrame:
+    """Cache de resultados de 15 minutos; considera a flag de mapping na chave."""
     scenario_filter = sql.SQL("") if show_mapping else sql.SQL("""
         AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
         AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
@@ -177,3 +183,14 @@ def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> 
             cursor.execute(query, (start, end))
             rows = cursor.fetchall()
     return pd.DataFrame.from_records(rows, columns=COLUMNS)
+
+
+def load_results(settings: DatabaseSettings, start: datetime, end: datetime) -> pd.DataFrame:
+    """Busca resultados, reutilizando cache por até 15 minutos."""
+    return _load_results_cached(settings, start, end, mapping_results_enabled())
+
+
+def clear_database_cache() -> None:
+    """Limpa os caches para forçar uma nova leitura do PostgreSQL."""
+    _load_filter_options_cached.clear()
+    _load_results_cached.clear()
