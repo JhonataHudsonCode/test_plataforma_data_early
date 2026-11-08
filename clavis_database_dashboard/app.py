@@ -18,23 +18,61 @@ from src.database import (DatabaseSettings, clear_database_cache, load_filter_op
                           load_results, mapping_results_enabled)
 
 
+alt.themes.register("clavis_dark", lambda: {
+    "config": {
+        "background": "#111827",
+        "view": {"stroke": None},
+        "axis": {
+            "gridColor": "#263244", "domainColor": "#475569", "tickColor": "#475569",
+            "labelColor": "#CBD5E1", "titleColor": "#E2E8F0", "labelFontSize": 12,
+            "titleFontSize": 13,
+        },
+        "legend": {"labelColor": "#CBD5E1", "titleColor": "#E2E8F0"},
+        "title": {"color": "#B6D7A8"},
+        "range": {"category": ["#70C1B9", "#B6D7A8", "#F45B69", "#00C087", "#4285F4"]},
+    }
+})
+alt.themes.enable("clavis_dark")
+
+
 st.set_page_config(page_title="Clavis | Testes", page_icon="📊", layout="wide")
 st.markdown(
     """<style>
+    :root {
+      --clavis-bg: #0B1220;
+      --clavis-surface: #111827;
+      --clavis-border: #263244;
+      --clavis-text: #E2E8F0;
+      --clavis-muted: #CBD5E1;
+      --clavis-title: #B6D7A8;
+      --clavis-accent: #70C1B9;
+      --clavis-fail: #F45B69;
+      --clavis-pass: #00C087;
+    }
     [data-testid="stAppDeployButton"] { display: none !important; }
-    [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] { background: #0B1220; color: #E2E8F0; }
-    [data-testid="stSidebar"] { background: #111827; border-right: 1px solid #263244; color: #E2E8F0; }
-    [data-testid="stMarkdownContainer"], [data-testid="stWidgetLabel"] { color: #CBD5E1; }
-    h1, h2, h3 { color: #B6D7A8; }
-    [data-testid="stMetric"] { background: #111827; border: 1px solid #263244; border-radius: 14px; padding: 16px 18px; box-shadow: 0 4px 16px rgba(0, 0, 0, .18); }
+    [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] { background: radial-gradient(ellipse at 85% 0%, rgba(112, 193, 185, .09), transparent 34%), var(--clavis-bg); color: var(--clavis-text); }
+    [data-testid="stMainBlockContainer"] { max-width: 1580px; padding: 2rem clamp(1rem, 3vw, 3rem) 4rem; }
+    [data-testid="stSidebar"] { background: var(--clavis-surface); border-right: 1px solid var(--clavis-border); color: var(--clavis-text); }
+    [data-testid="stMarkdownContainer"], [data-testid="stWidgetLabel"] { color: var(--clavis-muted); }
+    h1, h2, h3 { color: var(--clavis-title); letter-spacing: -.025em; }
+    h1 { font-weight: 750; }
+    [data-testid="stVerticalBlockBorderWrapper"] { background: linear-gradient(145deg, rgba(17, 24, 39, .98), rgba(11, 18, 32, .96)); border: 1px solid var(--clavis-border) !important; border-radius: 18px !important; box-shadow: 0 12px 32px rgba(0, 0, 0, .22); }
+    [data-testid="stMetric"] { background: linear-gradient(145deg, #111827, #131e2e); border: 1px solid var(--clavis-border); border-radius: 16px; padding: 18px 20px; box-shadow: 0 8px 22px rgba(0, 0, 0, .17); }
     [data-testid="stMetricLabel"] { color: #94A3B8; }
-    [data-testid="stMetricValue"] { color: #70C1B9; }
-    [data-baseweb="tab"][aria-selected="true"] { color: #70C1B9; }
-    [data-testid="stExpander"] { background: #111827; border: 1px solid #263244; border-radius: 12px; }
-    [data-testid="stButton"] > button { background: #111827; color: #E2E8F0; border-radius: 10px; border: 1px solid #334155; transition: all .15s ease; }
-    [data-testid="stButton"] > button:hover { border-color: #70C1B9; color: #70C1B9; box-shadow: 0 3px 10px rgba(0, 192, 135, .12); }
-    [data-testid="stDataFrame"] { border: 1px solid #263244; border-radius: 12px; overflow: hidden; }
-    [data-baseweb="select"] > div, [data-baseweb="input"] > div { background: #0B1220; border-color: #334155; }
+    [data-testid="stMetricValue"] { color: var(--clavis-accent); font-weight: 700; }
+    [data-baseweb="tab-list"] { gap: .45rem; border-bottom: 1px solid var(--clavis-border); }
+    [data-baseweb="tab"] { border-radius: 10px 10px 0 0; }
+    [data-baseweb="tab"][aria-selected="true"] { color: var(--clavis-accent); border-bottom-color: var(--clavis-accent); }
+    [data-testid="stExpander"] { background: var(--clavis-surface); border: 1px solid var(--clavis-border); border-radius: 12px; }
+    [data-testid="stButton"] > button { background: linear-gradient(145deg, #111827, #172235); color: var(--clavis-text); border-radius: 11px; border: 1px solid #334155; transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+    [data-testid="stButton"] > button:hover { transform: translateY(-1px); border-color: var(--clavis-accent); color: var(--clavis-accent); box-shadow: 0 6px 18px rgba(112, 193, 185, .14); }
+    [data-testid="stDataFrame"] { border: 1px solid var(--clavis-border); border-radius: 12px; overflow: hidden; }
+    [data-baseweb="select"] > div, [data-baseweb="input"] > div { background: var(--clavis-bg); border-color: #334155; }
+    @media (max-width: 760px) {
+      [data-testid="stMainBlockContainer"] { padding: 1rem .75rem 2rem; }
+      [data-testid="stMetric"] { padding: 13px 14px; }
+      h1 { font-size: 1.8rem; }
+    }
     </style>""",
     unsafe_allow_html=True,
 )
@@ -269,6 +307,48 @@ indicator_data = {
     "percentage": ("Índices com falha na comparação percentual", percentage_failure_details(filtered)),
     "missing_document": ("Índices sem documentos encontrados", missing_document_details(filtered)),
 }
+
+
+def render_daily_history(frame: pd.DataFrame, title: str, chart_key: str) -> None:
+    """Exibe falhas e aprovações por dia, com uma única categoria por data."""
+    with st.container(border=True):
+        st.subheader(title)
+        history = daily_validation_history(frame, display_zone)
+        if history.empty:
+            st.info("Não há execuções no período e projeto selecionados para compor este histórico.")
+            return
+
+        history["day_label"] = pd.to_datetime(history["execution_day"]).dt.strftime("%d/%m/%Y")
+        day_order = history["day_label"].drop_duplicates().tolist()
+        history["Resultado"] = history["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
+        chart = alt.Chart(history).mark_bar(
+            cornerRadiusTopLeft=5,
+            cornerRadiusTopRight=5,
+            size=22,
+        ).encode(
+            x=alt.X("day_label:O", title="Dia da execução", sort=day_order,
+                    axis=alt.Axis(labelAngle=-35, labelOverlap=False)),
+            xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
+            y=alt.Y("validations:Q", title="Quantidade de validações", scale=alt.Scale(domainMin=0)),
+            color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
+                domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
+            )),
+            tooltip=[
+                alt.Tooltip("day_label:N", title="Dia"),
+                alt.Tooltip("Resultado:N"),
+                alt.Tooltip("validations:Q", title="Validações"),
+            ],
+        )
+        st.altair_chart(
+            chart.properties(height=270).configure(background="#111827").configure_view(stroke=None).configure_axis(
+                gridColor="#263244", domainColor="#475569", tickColor="#475569",
+                labelColor="#CBD5E1", titleColor="#E2E8F0",
+            ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
+            use_container_width=True,
+            key=chart_key,
+        )
+
+
 detail_key = st.session_state.get("indicator_detail")
 if detail_key in indicator_data:
     title, details = indicator_data[detail_key]
@@ -400,36 +480,14 @@ with overview:
     row[1].metric("Cenários distintos", metrics["scenarios"])
     row[2].metric("Clientes distintos", metrics["clients"])
     st.caption("Cenários são contados por projeto e nome do teste; clientes, pelo identificador, sem duplicação entre execuções.")
-    st.subheader("Historico geral de falhas e aprovacoes")
-    daily = daily_validation_history(filtered, display_zone)
-    if daily.empty:
-        st.info("Nao ha execucoes no periodo para compor o historico.")
-    else:
-        daily["day_label"] = pd.to_datetime(daily["execution_day"]).dt.strftime("%d/%m/%Y")
-        day_order = daily["day_label"].drop_duplicates().tolist()
-        daily["Resultado"] = daily["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
-        st.altair_chart(
-            alt.Chart(daily).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5, size=22).encode(
-                x=alt.X("day_label:O", title="Dia da execucao", sort=day_order, axis=alt.Axis(labelAngle=-35, labelOverlap=False)),
-                xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
-                y=alt.Y("validations:Q", title="Quantidade de validacoes", scale=alt.Scale(domainMin=0)),
-                color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
-                    domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
-                )),
-                tooltip=[
-                    alt.Tooltip("day_label:N", title="Dia"), alt.Tooltip("Resultado:N"),
-                    alt.Tooltip("validations:Q", title="Validacoes"),
-                ],
-            ).properties(height=340).configure(background="#111827").configure_view(stroke=None).configure_axis(
-                gridColor="#263244", domainColor="#475569", tickColor="#475569",
-                labelColor="#CBD5E1", titleColor="#E2E8F0",
-            ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
-            use_container_width=True,
-        )
-        if st.button("Detalhar historico de sucessos e falhas por cliente", type="secondary"):
-            st.session_state["failure_history_detail"] = True
-            st.rerun()
-    st.caption("Barras vermelhas mostram falhas e verdes, aprovacoes por dia. Cada data aparece uma vez, sem horario.")
+    render_daily_history(filtered, "Histórico geral de falhas e aprovações", "history_general")
+    for project in ("after", "early"):
+        project_rows = filtered[filtered["project"].astype("string").str.casefold().eq(project)]
+        render_daily_history(project_rows, f"Histórico do projeto {project.capitalize()}", f"history_{project}")
+    st.caption("Barras vermelhas mostram falhas e verdes, aprovações. Cada data aparece uma única vez, sem horários.")
+    if st.button("Detalhar histórico de sucessos e falhas por cliente", type="secondary"):
+        st.session_state["failure_history_detail"] = True
+        st.rerun()
 
     st.subheader("Duração da bateria completa por projeto")
     run_filters = {key: st.session_state["dashboard_filters"].get(key, []) for key in ("project", "environment")}
@@ -447,26 +505,33 @@ with overview:
             column.caption(f"{run['scenario_count']} cenários · {run['environment']} · {started}")
         st.caption("Critério: maior quantidade de cenários registrados no período por projeto; em caso de empate, a execução mais recente. O banco não informa explicitamente se a bateria foi completa.")
     st.subheader("Problemas nos índices")
-    indicator_columns = st.columns(3)
-    for column, (key, (title, details)) in zip(indicator_columns, indicator_data.items()):
-        with column:
-            count = count_affected_indexes(details)
-            if st.button(f"{title}: {count}", key=f"indicator_{key}", use_container_width=True):
+    for key, (title, details) in indicator_data.items():
+        with st.container(border=True):
+            st.metric(title, count_affected_indexes(details))
+            if st.button("Abrir detalhes", key=f"indicator_{key}", use_container_width=True):
                 st.session_state["indicator_detail"] = key
                 st.rerun()
             if key == "missing_document":
                 dated = empty_index_date_details(filtered, display_zone)
                 st.caption(f"Hoje: {(dated['date_role'] == 'Hoje').sum()} · Ontem: {(dated['date_role'] == 'Ontem').sum()} (referentes a cada execução)")
             if details.empty:
-                st.caption("Nenhum índice identificado.")
+                st.caption("Nenhum índice identificado para este indicador.")
             else:
                 unique = details.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])
                 chart_data = unique.groupby("index_name").size().nlargest(5).reset_index(name="Clientes ou origens")
-                st.altair_chart(alt.Chart(chart_data).mark_bar(color="#D83026").encode(
-                    x=alt.X("Clientes ou origens:Q", title="Clientes ou origens"),
+                indicator_chart = alt.Chart(chart_data).mark_bar(
+                    color="#F45B69", cornerRadiusEnd=6, size=20
+                ).encode(
+                    x=alt.X("Clientes ou origens:Q", title="Clientes ou origens", scale=alt.Scale(domainMin=0)),
                     y=alt.Y("index_name:N", title=None, sort="-x"),
                     tooltip=["index_name:N", "Clientes ou origens:Q"],
-                ).properties(height=140), use_container_width=True)
+                ).properties(height=max(115, min(230, len(chart_data) * 38))).configure(
+                    background="#111827"
+                ).configure_view(stroke=None).configure_axis(
+                    gridColor="#263244", domainColor="#475569", tickColor="#475569",
+                    labelColor="#CBD5E1", titleColor="#E2E8F0",
+                )
+                st.altair_chart(indicator_chart, use_container_width=True, key=f"chart_{key}")
     st.caption("Totais de índices distintos por projeto, ambiente e cliente ou origem. Clique em um indicador para ver os detalhes. A identificação depende das mensagens dos testes.")
     stages = filtered[filtered["result_id"].notna()].drop_duplicates(
         subset=["scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
