@@ -57,6 +57,18 @@ st.markdown(
     h1, h2, h3 { color: var(--clavis-title); letter-spacing: -.025em; }
     h1 { font-weight: 750; }
     [data-testid="stVerticalBlockBorderWrapper"] { background: linear-gradient(145deg, rgba(17, 24, 39, .98), rgba(11, 18, 32, .96)); border: 1px solid var(--clavis-border) !important; border-radius: 18px !important; box-shadow: 0 12px 32px rgba(0, 0, 0, .22); }
+    .indicator-heading { display: flex; align-items: center; gap: 14px; padding: 4px 2px 0; }
+    .indicator-icon { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 13px; color: var(--indicator-accent); background: color-mix(in srgb, var(--indicator-accent) 13%, #111827); border: 1px solid color-mix(in srgb, var(--indicator-accent) 40%, #263244); font-size: 1.3rem; font-weight: 800; box-shadow: 0 0 20px color-mix(in srgb, var(--indicator-accent) 14%, transparent); }
+    .indicator-copy { min-width: 0; }
+    .indicator-kicker { color: #94A3B8; font-size: .68rem; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; margin-bottom: 3px; }
+    .indicator-title { color: var(--clavis-text); font-size: clamp(1rem, 1.5vw, 1.22rem); font-weight: 700; line-height: 1.25; }
+    .indicator-total { margin-left: auto; color: var(--indicator-accent); font-size: clamp(1.8rem, 3vw, 2.55rem); font-weight: 780; line-height: 1; letter-spacing: -.045em; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .indicator-total span { display: block; padding-top: 6px; color: #94A3B8; font-size: .66rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+    .indicator-description { margin: 10px 0 4px 56px; color: #94A3B8; font-size: .84rem; line-height: 1.45; }
+    .indicator-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px 56px; }
+    .indicator-chip { border: 1px solid var(--clavis-border); border-radius: 999px; background: rgba(11, 18, 32, .72); color: var(--clavis-muted); padding: 5px 10px; font-size: .74rem; }
+    .indicator-chip strong { color: var(--clavis-accent); font-variant-numeric: tabular-nums; }
+    .indicator-card-chart { margin-top: 8px; padding: 8px 4px 0; border-top: 1px solid rgba(38, 50, 68, .72); }
     [data-testid="stMetric"] { background: linear-gradient(145deg, #111827, #131e2e); border: 1px solid var(--clavis-border); border-radius: 16px; padding: 18px 20px; box-shadow: 0 8px 22px rgba(0, 0, 0, .17); }
     [data-testid="stMetricLabel"] { color: #94A3B8; }
     [data-testid="stMetricValue"] { color: var(--clavis-accent); font-weight: 700; }
@@ -71,6 +83,11 @@ st.markdown(
     @media (max-width: 760px) {
       [data-testid="stMainBlockContainer"] { padding: 1rem .75rem 2rem; }
       [data-testid="stMetric"] { padding: 13px 14px; }
+      .indicator-heading { gap: 10px; }
+      .indicator-icon { flex-basis: 36px; width: 36px; height: 36px; border-radius: 11px; }
+      .indicator-total { font-size: 1.65rem; }
+      .indicator-total span { font-size: .58rem; }
+      .indicator-description, .indicator-meta { margin-left: 46px; }
       h1 { font-size: 1.8rem; }
     }
     </style>""",
@@ -505,30 +522,94 @@ with overview:
             column.caption(f"{run['scenario_count']} cenários · {run['environment']} · {started}")
         st.caption("Critério: maior quantidade de cenários registrados no período por projeto; em caso de empate, a execução mais recente. O banco não informa explicitamente se a bateria foi completa.")
     st.subheader("Problemas nos índices")
+    indicator_presentation = {
+        "missing_index": {
+            "kicker": "01 / Integridade do índice", "icon": "!", "accent": "#F45B69",
+            "description": "Índices que o teste esperava encontrar e não localizou.",
+            "count_label": "índices afetados",
+        },
+        "percentage": {
+            "kicker": "02 / Variação dos dados", "icon": "↗", "accent": "#70C1B9",
+            "description": "Índices com valores fora da variação percentual permitida.",
+            "count_label": "índices com falha",
+        },
+        "missing_document": {
+            "kicker": "03 / Cobertura da ingestão", "icon": "◌", "accent": "#B6D7A8",
+            "description": "Índices sem documentos nas datas recentes verificadas.",
+            "count_label": "índices afetados",
+        },
+    }
     for key, (title, details) in indicator_data.items():
-        with st.container(border=True):
-            st.metric(title, count_affected_indexes(details))
-            if st.button("Abrir detalhes", key=f"indicator_{key}", use_container_width=True):
+        presentation = indicator_presentation[key]
+        count = count_affected_indexes(details)
+        with st.container(border=True, key=f"indicator_card_{key}"):
+            st.markdown(
+                f"""
+                <div class="indicator-heading" style="--indicator-accent: {presentation['accent']}">
+                  <div class="indicator-icon">{presentation['icon']}</div>
+                  <div class="indicator-copy">
+                    <div class="indicator-kicker">{presentation['kicker']}</div>
+                    <div class="indicator-title">{title}</div>
+                  </div>
+                  <div class="indicator-total" style="--indicator-accent: {presentation['accent']}">
+                    {count}<span>{presentation['count_label']}</span>
+                  </div>
+                </div>
+                <div class="indicator-description">{presentation['description']}</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button("Explorar clientes e ocorrências  →", key=f"indicator_{key}", use_container_width=True):
                 st.session_state["indicator_detail"] = key
                 st.rerun()
             if key == "missing_document":
                 dated = empty_index_date_details(filtered, display_zone)
-                st.caption(f"Hoje: {(dated['date_role'] == 'Hoje').sum()} · Ontem: {(dated['date_role'] == 'Ontem').sum()} (referentes a cada execução)")
+                st.markdown(
+                    f"""
+                    <div class="indicator-meta">
+                      <span class="indicator-chip">Hoje <strong>{(dated['date_role'] == 'Hoje').sum()}</strong></span>
+                      <span class="indicator-chip">Ontem <strong>{(dated['date_role'] == 'Ontem').sum()}</strong></span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
             if details.empty:
-                st.caption("Nenhum índice identificado para este indicador.")
+                st.caption("Nenhuma ocorrência registrada para este indicador no período selecionado.")
             else:
                 unique = details.drop_duplicates(subset=["project", "environment", "scope_label", "index_name"])
                 chart_data = unique.groupby("index_name").size().nlargest(5).reset_index(name="Clientes ou origens")
-                indicator_chart = alt.Chart(chart_data).mark_bar(
-                    color="#F45B69", cornerRadiusEnd=6, size=20
+                accent = presentation["accent"]
+                x_encoding = alt.X(
+                    "Clientes ou origens:Q", title="Clientes ou origens",
+                    scale=alt.Scale(domainMin=0, nice=True),
+                    axis=alt.Axis(gridColor="#263244", domain=False, tickColor="#475569"),
+                )
+                y_encoding = alt.Y(
+                    "index_name:N", title=None, sort="-x",
+                    axis=alt.Axis(domain=False, ticks=False, labelLimit=340),
+                )
+                base_chart = alt.Chart(chart_data)
+                lollipop_line = base_chart.mark_rule(
+                    color=accent, opacity=.7, strokeWidth=3, strokeCap="round"
+                ).encode(x=x_encoding, x2=alt.datum(0), y=y_encoding)
+                lollipop_point = base_chart.mark_point(
+                    filled=True, color=accent, size=105, stroke="#E2E8F0", strokeWidth=1.2
                 ).encode(
-                    x=alt.X("Clientes ou origens:Q", title="Clientes ou origens", scale=alt.Scale(domainMin=0)),
-                    y=alt.Y("index_name:N", title=None, sort="-x"),
-                    tooltip=["index_name:N", "Clientes ou origens:Q"],
-                ).properties(height=max(115, min(230, len(chart_data) * 38))).configure(
+                    x=x_encoding, y=y_encoding,
+                    tooltip=[alt.Tooltip("index_name:N", title="Índice"),
+                             alt.Tooltip("Clientes ou origens:Q", title="Clientes ou origens")],
+                )
+                value_label = base_chart.mark_text(
+                    align="left", dx=10, color="#E2E8F0", fontWeight=700
+                ).encode(
+                    x=x_encoding, y=y_encoding,
+                    text=alt.Text("Clientes ou origens:Q", format="d"),
+                )
+                indicator_chart = (lollipop_line + lollipop_point + value_label).properties(
+                    height=max(125, min(240, len(chart_data) * 42))
+                ).configure(
                     background="#111827"
                 ).configure_view(stroke=None).configure_axis(
-                    gridColor="#263244", domainColor="#475569", tickColor="#475569",
                     labelColor="#CBD5E1", titleColor="#E2E8F0",
                 )
                 st.altair_chart(indicator_chart, use_container_width=True, key=f"chart_{key}")
