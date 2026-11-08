@@ -80,18 +80,18 @@ def mapping_results_enabled() -> bool:
 def _load_filter_options_cached(settings: DatabaseSettings, show_mapping: bool) -> dict[str, list[str]]:
     """Cache de 15 minutos das opções, separado pela flag de mapping."""
     scenario_filter = sql.SQL("") if show_mapping else sql.SQL("""
-        AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
-        AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
+        AND COALESCE(s.title, '') NOT ILIKE '%%mapping%%'
+        AND COALESCE(s.test_name, '') NOT ILIKE '%%mapping%%'
     """)
     result_filter = sql.SQL("") if show_mapping else sql.SQL("""
-        AND COALESCE(v.validation_type, '') NOT ILIKE '%mapping%'
+        AND COALESCE(v.validation_type, '') NOT ILIKE '%%mapping%%'
     """)
     run_filter = sql.SQL("") if show_mapping else sql.SQL("""
         AND EXISTS (
             SELECT 1 FROM {scenarios} AS eligible
             WHERE eligible.run_id = r.id
-              AND COALESCE(eligible.title, '') NOT ILIKE '%mapping%'
-              AND COALESCE(eligible.test_name, '') NOT ILIKE '%mapping%'
+              AND COALESCE(eligible.title, '') NOT ILIKE '%%mapping%%'
+              AND COALESCE(eligible.test_name, '') NOT ILIKE '%%mapping%%'
         )
     """).format(scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"))
     query = sql.SQL("""
@@ -129,7 +129,8 @@ def _load_filter_options_cached(settings: DatabaseSettings, show_mapping: bool) 
     ) as connection:
         connection.read_only = True
         with connection.cursor() as cursor:
-            cursor.execute(query)
+            # Passa tupla vazia para o Psycopg reduzir %% a % nos padrões ILIKE.
+            cursor.execute(query, ())
             for row in cursor.fetchall():
                 if row["kind"] in options and row["value"]:
                     options[row["kind"]].append(str(row["value"]))
@@ -145,7 +146,7 @@ def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
 def _load_results_cached(settings: DatabaseSettings, start: datetime, end: datetime, show_mapping: bool) -> pd.DataFrame:
     """Cache de resultados de 15 minutos; considera a flag de mapping na chave."""
     result_filter = sql.SQL("") if show_mapping else sql.SQL("""
-        AND COALESCE(v.validation_type, '') NOT ILIKE '%mapping%'
+        AND COALESCE(v.validation_type, '') NOT ILIKE '%%mapping%%'
     """)
     if show_mapping:
         scenario_join = sql.SQL("LEFT JOIN {scenarios} AS s ON s.run_id = r.id").format(
@@ -154,8 +155,8 @@ def _load_results_cached(settings: DatabaseSettings, start: datetime, end: datet
     else:
         scenario_join = sql.SQL("""
             JOIN {scenarios} AS s ON s.run_id = r.id
-             AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
-             AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
+             AND COALESCE(s.title, '') NOT ILIKE '%%mapping%%'
+             AND COALESCE(s.test_name, '') NOT ILIKE '%%mapping%%'
         """).format(scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"))
     query = sql.SQL("""
         SELECT r.id AS run_id, r.project, r.environment, r.started_at, r.finished_at,
