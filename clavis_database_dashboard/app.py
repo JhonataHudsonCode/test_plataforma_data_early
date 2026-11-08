@@ -11,7 +11,7 @@ import psycopg
 import streamlit as st
 
 from src.analysis import (SCENARIO_LABELS, STATUS_LABELS, apply_filters, count_affected_indexes,
-                          client_validation_history, daily_failure_history, empty_index_date_details,
+                          client_validation_history, daily_validation_history, empty_index_date_details,
                           format_duration, index_results, missing_document_details,
                           missing_index_details, percentage_attribute_details, percentage_failure_details, run_duration_summary, scenario_summary, summarize)
 from src.database import (DatabaseSettings, clear_database_cache, load_filter_options,
@@ -52,8 +52,14 @@ except (ValueError, ZoneInfoNotFoundError) as error:
 
 today = datetime.now(display_zone).date()
 data = st.session_state.get("dashboard_data")
-st.session_state.setdefault("filter_start_date", today - timedelta(days=30))
-st.session_state.setdefault("filter_end_date", today)
+current_week_start = today - timedelta(days=today.weekday())
+auto_load_current_week = not st.session_state.get("dashboard_initial_week_loaded", False)
+if auto_load_current_week:
+    st.session_state["filter_start_date"] = current_week_start
+    st.session_state["filter_end_date"] = today
+else:
+    st.session_state.setdefault("filter_start_date", current_week_start)
+    st.session_state.setdefault("filter_end_date", today)
 
 
 def set_filter_date(widget_key: str, selected_date) -> None:
@@ -136,23 +142,17 @@ def select_scenarios() -> None:
 with st.sidebar:
     st.header("Filtros")
     with st.container():
-        start_column, yesterday_column = st.columns([3, 1])
-        with start_column:
-            start_date = st.date_input("Data inicial", key="filter_start_date")
-        with yesterday_column:
-            st.button(
-                "Ontem", key="set_start_yesterday", use_container_width=True,
-                on_click=set_filter_date,
-                args=("filter_start_date", today - timedelta(days=1)),
-            )
-        end_column, today_column = st.columns([3, 1])
-        with end_column:
-            end_date = st.date_input("Data final", key="filter_end_date")
-        with today_column:
-            st.button(
-                "Hoje", key="set_end_today", use_container_width=True,
-                on_click=set_filter_date, args=("filter_end_date", today),
-            )
+        start_date = st.date_input("Data inicial", key="filter_start_date")
+        st.button(
+            "Ontem", key="set_start_yesterday", use_container_width=True,
+            on_click=set_filter_date,
+            args=("filter_start_date", today - timedelta(days=1)),
+        )
+        end_date = st.date_input("Data final", key="filter_end_date")
+        st.button(
+            "Hoje", key="set_end_today", use_container_width=True,
+            on_click=set_filter_date, args=("filter_end_date", today),
+        )
         projects = st.multiselect("Projeto", choices("project"))
         environments = st.multiselect("Ambiente", choices("environment"))
         st.markdown("**Cenário**")
@@ -175,8 +175,14 @@ with st.sidebar:
             st.session_state.pop("dashboard_filter_options", None)
             st.session_state["force_refresh_search"] = True
             st.rerun()
-        submitted = submitted or st.session_state.pop("force_refresh_search", False)
+        submitted = (
+            submitted
+            or st.session_state.pop("force_refresh_search", False)
+            or auto_load_current_week
+        )
         search_error = False
+        if submitted and auto_load_current_week:
+            st.session_state["dashboard_initial_week_loaded"] = True
         if submitted and start_date <= end_date:
             button_area.button("⏳ Pesquisando...", type="primary", disabled=True)
             start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
@@ -198,6 +204,7 @@ if submitted:
     if start_date > end_date:
         st.error("A data inicial deve ser anterior ou igual à data final.")
         st.stop()
+    st.session_state["dashboard_initial_week_loaded"] = True
     st.session_state["dashboard_data"] = data
     if not data.empty:
         for column, existing in st.session_state["dashboard_filter_options"].items():
@@ -318,21 +325,23 @@ if st.session_state.get("failure_history_detail"):
         selected_client = st.selectbox("Cliente", client_options, key="history_client")
         history = client_validation_history(filtered, selected_client, display_zone)
         if history.empty:
-            st.info("Não há histórico de validações para este cliente no período selecionado.")
+            st.info("Nao ha historico de validacoes para este cliente no periodo selecionado.")
         else:
+            history["day_label"] = pd.to_datetime(history["execution_day"]).dt.strftime("%d/%m/%Y")
+            day_order = history["day_label"].drop_duplicates().tolist()
             history["Resultado"] = history["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
             client_chart = alt.Chart(history).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5, size=22).encode(
-                    x=alt.X("execution_day:T", title="Dia da execução", axis=alt.Axis(format="%d/%m/%Y", labelAngle=-35)),
-                    xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
-                    y=alt.Y("validations:Q", title="Quantidade de validações", scale=alt.Scale(domainMin=0)),
-                    color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
-                        domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
-                    )),
-                    tooltip=[
-                        alt.Tooltip("execution_day:T", title="Dia", format="%d/%m/%Y"),
-                        alt.Tooltip("Resultado:N"), alt.Tooltip("validations:Q", title="Validações"),
-                    ],
-                )
+                x=alt.X("day_label:O", title="Dia da execucao", sort=day_order, axis=alt.Axis(labelAngle=-35, labelOverlap=False)),
+                xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
+                y=alt.Y("validations:Q", title="Quantidade de validacoes", scale=alt.Scale(domainMin=0)),
+                color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
+                    domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
+                )),
+                tooltip=[
+                    alt.Tooltip("day_label:N", title="Dia"),
+                    alt.Tooltip("Resultado:N"), alt.Tooltip("validations:Q", title="Validacoes"),
+                ],
+            )
             st.altair_chart(
                 client_chart.properties(height=360).configure(background="#111827").configure_view(stroke=None).configure_axis(
                     gridColor="#263244", domainColor="#475569", tickColor="#475569",
@@ -340,10 +349,10 @@ if st.session_state.get("failure_history_detail"):
                 ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
                 use_container_width=True,
             )
-            chart_table = history[["execution_day", "Resultado", "validations"]].rename(columns={
-                "execution_day": "Dia", "validations": "Validações",
-            })
-            chart_table["Dia"] = pd.to_datetime(chart_table["Dia"]).dt.strftime("%d/%m/%Y")
+            chart_table = history.pivot(index="day_label", columns="result_status", values="validations").rename(columns={
+                "failed": "Falhas", "passed": "Aprovadas",
+            }).reset_index().rename(columns={"day_label": "Dia"})
+            chart_table = chart_table[["Dia", "Falhas", "Aprovadas"]]
             st.dataframe(chart_table, hide_index=True, use_container_width=True)
     st.stop()
 
@@ -359,67 +368,36 @@ with overview:
     row[1].metric("Cenários distintos", metrics["scenarios"])
     row[2].metric("Clientes distintos", metrics["clients"])
     st.caption("Cenários são contados por projeto e nome do teste; clientes, pelo identificador, sem duplicação entre execuções.")
-    st.subheader("Histórico geral de falhas")
-    daily = daily_failure_history(filtered, display_zone)
+    st.subheader("Historico geral de falhas e aprovacoes")
+    daily = daily_validation_history(filtered, display_zone)
     if daily.empty:
-        st.info("Não há execuções no período para compor o histórico.")
+        st.info("Nao ha execucoes no periodo para compor o historico.")
     else:
-        daily = daily.groupby("execution_day", as_index=False).agg(
-            failures=("failures", "sum"), runs=("runs", "sum"),
-        ).sort_values("execution_day")
         daily["day_label"] = pd.to_datetime(daily["execution_day"]).dt.strftime("%d/%m/%Y")
-        daily["open_failures"] = daily["failures"].shift(1).fillna(daily["failures"])
-        daily["close_failures"] = daily["failures"]
-        daily["candle_low"] = daily[["open_failures", "close_failures"]].min(axis=1)
-        daily["candle_high"] = daily[["open_failures", "close_failures"]].max(axis=1)
-        daily["direction"] = "Sem variação"
-        daily.loc[daily["close_failures"] > daily["open_failures"], "direction"] = "Falhas aumentaram"
-        daily.loc[daily["close_failures"] < daily["open_failures"], "direction"] = "Falhas diminuíram"
-        day_order = daily["day_label"].tolist()
-        x_axis = alt.X(
-            "day_label:O", title="Dia da execu\u00e7\u00e3o", sort=day_order,
-            axis=alt.Axis(labelAngle=-35, labelOverlap=False),
-        )
-        candle_color = alt.Color("direction:N", title="Variação diária", scale=alt.Scale(
-            domain=["Falhas aumentaram", "Falhas diminuíram", "Sem variação"],
-            range=["#F45B69", "#00C087", "#94A3B8"],
-        ), legend=alt.Legend(orient="top"))
-        tooltip = [
-            alt.Tooltip("day_label:N", title="Dia"),
-            alt.Tooltip("open_failures:Q", title="Falhas no dia anterior"),
-            alt.Tooltip("close_failures:Q", title="Falhas no dia"),
-            alt.Tooltip("runs:Q", title="Execuções"), alt.Tooltip("direction:N", title="Variação"),
-        ]
-        wick = alt.Chart(daily).mark_rule(strokeWidth=2).encode(
-            x=x_axis,
-            y=alt.Y("candle_low:Q", title="Quantidade de falhas", scale=alt.Scale(domainMin=0)),
-            y2="candle_high:Q", color=candle_color, tooltip=tooltip,
-        )
-        body = alt.Chart(daily[daily["candle_low"] != daily["candle_high"]]).mark_bar(
-            size=18, cornerRadius=3,
-        ).encode(
-            x=x_axis,
-            y=alt.Y("candle_low:Q", scale=alt.Scale(domainMin=0)), y2="candle_high:Q",
-            color=candle_color, tooltip=tooltip,
-        )
-        doji = alt.Chart(daily[daily["candle_low"] == daily["candle_high"]]).mark_tick(
-            orient="horizontal", size=18, thickness=3,
-        ).encode(
-            x=x_axis, y=alt.Y("close_failures:Q", scale=alt.Scale(domainMin=0)),
-            color=candle_color, tooltip=tooltip,
-        )
+        day_order = daily["day_label"].drop_duplicates().tolist()
+        daily["Resultado"] = daily["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
         st.altair_chart(
-            (wick + body + doji).properties(height=340).configure(background="#111827").configure_view(stroke=None).configure_axis(
+            alt.Chart(daily).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5, size=22).encode(
+                x=alt.X("day_label:O", title="Dia da execucao", sort=day_order, axis=alt.Axis(labelAngle=-35, labelOverlap=False)),
+                xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
+                y=alt.Y("validations:Q", title="Quantidade de validacoes", scale=alt.Scale(domainMin=0)),
+                color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
+                    domain=["Falhas", "Aprovadas"], range=["#F45B69", "#00C087"]
+                )),
+                tooltip=[
+                    alt.Tooltip("day_label:N", title="Dia"), alt.Tooltip("Resultado:N"),
+                    alt.Tooltip("validations:Q", title="Validacoes"),
+                ],
+            ).properties(height=340).configure(background="#111827").configure_view(stroke=None).configure_axis(
                 gridColor="#263244", domainColor="#475569", tickColor="#475569",
                 labelColor="#CBD5E1", titleColor="#E2E8F0",
             ).configure_legend(labelColor="#CBD5E1", titleColor="#E2E8F0"),
             use_container_width=True,
         )
-        if st.button("Detalhar histórico de sucessos e falhas por cliente", type="secondary"):
+        if st.button("Detalhar historico de sucessos e falhas por cliente", type="secondary"):
             st.session_state["failure_history_detail"] = True
             st.rerun()
-    st.caption("Estilo candle: abertura = falhas do dia anterior; fechamento = falhas do dia. Vermelho indica aumento e verde, redução. Horários não são exibidos.")
-
+    st.caption("Barras vermelhas mostram falhas e verdes, aprovacoes por dia. Cada data aparece uma vez, sem horario.")
 
     st.subheader("Duração da bateria completa por projeto")
     run_filters = {key: st.session_state["dashboard_filters"].get(key, []) for key in ("project", "environment")}

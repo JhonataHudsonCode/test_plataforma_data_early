@@ -229,32 +229,51 @@ def daily_failure_history(frame: pd.DataFrame, display_zone) -> pd.DataFrame:
 
 def client_validation_history(frame: pd.DataFrame, client_id: str, display_zone) -> pd.DataFrame:
     """Conta resultados aprovados e com falha por dia para um cliente."""
+    return daily_validation_history(frame, display_zone, client_id=client_id)
+
+
+def daily_validation_history(
+    frame: pd.DataFrame,
+    display_zone,
+    *,
+    client_id: str | None = None,
+) -> pd.DataFrame:
+    """Conta resultados distintos aprovados e com falha por dia."""
     columns = ["execution_day", "result_status", "validations"]
     if frame.empty:
         return pd.DataFrame(columns=columns)
-    messages = frame.loc[
-        frame["result_id"].notna()
-        & frame["scope_type"].eq("client")
-        & frame["client_id"].astype("string").eq(str(client_id))
-        & frame["result_status"].isin(["failed", "passed"])
-    ].drop_duplicates(
+
+    mask = frame["result_id"].notna() & frame["result_status"].isin(["failed", "passed"])
+    if client_id is not None:
+        mask &= frame["scope_type"].eq("client") & frame["client_id"].astype("string").eq(str(client_id))
+    messages = frame.loc[mask].drop_duplicates(
         subset=["run_id", "scenario_id", "scope_type", "scope_label", "validation_type", "result_status"]
     ).copy()
-    if messages.empty:
-        return pd.DataFrame(columns=columns)
     messages["execution_day"] = (
         pd.to_datetime(messages["started_at"], utc=True, errors="coerce")
         .dt.tz_convert(display_zone)
         .dt.date
     )
-    return (
-        messages.dropna(subset=["execution_day"])
-        .groupby(["execution_day", "result_status"])
-        .size()
-        .rename("validations")
-        .reset_index()
-        .sort_values("execution_day")
+    messages = messages.dropna(subset=["execution_day"])
+
+    if client_id is None:
+        runs = frame.loc[frame["run_id"].notna(), ["run_id", "started_at"]].drop_duplicates("run_id").copy()
+        runs["execution_day"] = (
+            pd.to_datetime(runs["started_at"], utc=True, errors="coerce")
+            .dt.tz_convert(display_zone)
+            .dt.date
+        )
+        days = sorted(runs["execution_day"].dropna().unique())
+    else:
+        days = sorted(messages["execution_day"].unique())
+    if not days:
+        return pd.DataFrame(columns=columns)
+
+    counts = messages.groupby(["execution_day", "result_status"]).size()
+    all_statuses = pd.MultiIndex.from_product(
+        [days, ["failed", "passed"]], names=["execution_day", "result_status"]
     )
+    return counts.reindex(all_statuses, fill_value=0).rename("validations").reset_index()
 
 
 def format_duration(value) -> str:
