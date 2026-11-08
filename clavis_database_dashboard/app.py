@@ -73,6 +73,40 @@ def set_filter_date(widget_key: str, selected_date) -> None:
     st.session_state[widget_key] = selected_date
 
 
+@st.dialog("Carregando dados do dashboard", dismissible=False)
+def load_initial_week() -> None:
+    start_date = st.session_state["filter_start_date"]
+    end_date = st.session_state["filter_end_date"]
+    st.write("Na primeira abertura, carregamos os dados da semana atual para preparar a visão geral.")
+    st.caption(f"Período: {start_date:%d/%m/%Y} a {end_date:%d/%m/%Y}")
+    try:
+        start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
+        end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
+        with st.spinner("Consultando o PostgreSQL e montando os filtros..."):
+            filter_options = load_filter_options(settings)
+            results = load_results(settings, start, end)
+    except (psycopg.Error, OSError) as error:
+        detail = getattr(getattr(error, "diag", None), "message_primary", None) or str(error)
+        sqlstate = getattr(error, "sqlstate", None)
+        st.error(f"Não foi possível carregar os dados ({sqlstate or type(error).__name__}): {detail}")
+        st.button("Tentar novamente", type="primary", use_container_width=True)
+        return
+
+    st.session_state["dashboard_filter_options"] = filter_options
+    st.session_state["dashboard_data"] = results
+    st.session_state["dashboard_filters"] = {
+        "project": [], "environment": [], "title": [], "client_id": [],
+        "validation_type": [], "result_status": [],
+    }
+    st.session_state["dashboard_initial_week_loaded"] = True
+    st.rerun()
+
+
+if auto_load_current_week:
+    load_initial_week()
+    st.stop()
+
+
 if "dashboard_filter_options" not in st.session_state:
     try:
         with st.spinner("Carregando opções dos filtros..."):
