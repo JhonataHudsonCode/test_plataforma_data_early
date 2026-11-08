@@ -112,12 +112,23 @@ data = st.session_state.get("dashboard_data")
 previous_mapping_setting = st.session_state.get("_mapping_setting")
 if previous_mapping_setting is not None and previous_mapping_setting != show_mapping_results:
     clear_database_cache()
-    for key in ("dashboard_data", "dashboard_filters", "dashboard_filter_options", "selected_scenarios"):
+    for key in (
+        "dashboard_data", "dashboard_query_cache", "dashboard_query_ranges",
+        "dashboard_filters", "dashboard_filter_options", "dashboard_date_range", "selected_scenarios",
+        "dashboard_initial_week_loaded", "filter_projects", "filter_environments",
+        "filter_clients", "filter_validation_types", "filter_statuses",
+    ):
         st.session_state.pop(key, None)
     data = None
 st.session_state["_mapping_setting"] = show_mapping_results
 current_week_start = today - timedelta(days=today.weekday())
-auto_load_current_week = not st.session_state.get("dashboard_initial_week_loaded", False)
+auto_load_current_week = (
+    not st.session_state.get("dashboard_initial_week_loaded", False)
+    or any(
+        key not in st.session_state
+        for key in ("dashboard_data", "dashboard_query_cache", "dashboard_query_ranges", "dashboard_filter_options")
+    )
+)
 if auto_load_current_week:
     st.session_state["filter_start_date"] = current_week_start
     st.session_state["filter_end_date"] = today
@@ -129,6 +140,83 @@ else:
 def set_filter_date(widget_key: str, selected_date) -> None:
     st.session_state[widget_key] = selected_date
 
+
+def select_date_range(frame: pd.DataFrame, start_date, end_date) -> pd.DataFrame:
+    """Filtra em memoria os resultados ja carregados para as datas selecionadas."""
+    if frame.empty:
+        return frame.copy()
+    local_dates = (
+        pd.to_datetime(frame["started_at"], utc=True, errors="coerce")
+        .dt.tz_convert(display_zone)
+        .dt.date
+    )
+    return frame.loc[local_dates.between(start_date, end_date)].copy()
+
+
+def missing_date_ranges(start_date, end_date, cached_ranges):
+    """Retorna somente os trechos do periodo que ainda nao foram consultados."""
+    gaps = []
+    cursor = start_date
+    for covered_start, covered_end in sorted(cached_ranges):
+        if covered_end < cursor:
+            continue
+        if covered_start > end_date:
+            break
+        if covered_start > cursor:
+            gaps.append((cursor, min(end_date, covered_start - timedelta(days=1))))
+        cursor = max(cursor, covered_end + timedelta(days=1))
+        if cursor > end_date:
+            break
+    if cursor <= end_date:
+        gaps.append((cursor, end_date))
+    return gaps
+
+
+def merge_date_range(start_date, end_date, cached_ranges):
+    """Une periodos sobrepostos ou consecutivos para manter a cobertura compacta."""
+    merged = []
+    new_start, new_end = start_date, end_date
+    for old_start, old_end in sorted(cached_ranges):
+        if old_end + timedelta(days=1) < new_start:
+            merged.append((old_start, old_end))
+        elif new_end + timedelta(days=1) < old_start:
+            merged.append((new_start, new_end))
+            new_start, new_end = old_start, old_end
+        else:
+            new_start = min(new_start, old_start)
+            new_end = max(new_end, old_end)
+    merged.append((new_start, new_end))
+    return merged
+
+
+def append_session_cache(current: pd.DataFrame, new_rows: pd.DataFrame) -> pd.DataFrame:
+    """Acrescenta linhas carregadas sem duplicar execucoes/cenarios/resultados."""
+    if current is None or current.empty:
+        return new_rows.copy()
+    if new_rows.empty:
+        return current.copy()
+    combined = pd.concat([current, new_rows], ignore_index=True)
+    unique_keys = [key for key in ("run_id", "scenario_id", "result_id") if key in combined.columns]
+    return combined.drop_duplicates(subset=unique_keys, keep="last").reset_index(drop=True) if unique_keys else combined
+
+
+def fetch_missing_dates(start_date, end_date) -> pd.DataFrame:
+    """Busca apenas dias ainda n??o cobertos e persiste o cache na sessao atual."""
+    cached = st.session_state.get("dashboard_query_cache")
+    if cached is None:
+        cached = pd.DataFrame()
+    covered = st.session_state.get("dashboard_query_ranges", [])
+    gaps = missing_date_ranges(start_date, end_date, covered)
+    for gap_start, gap_end in gaps:
+        query_start = datetime.combine(gap_start, time.min, tzinfo=display_zone).astimezone(timezone.utc)
+        query_end = datetime.combine(gap_end + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
+        fetched = load_results(settings, query_start, query_end)
+        cached = append_session_cache(cached, fetched)
+        covered = merge_date_range(gap_start, gap_end, covered)
+        # Preserve each successful segment if a later segment errors; retries fetch only the remainder.
+        st.session_state["dashboard_query_cache"] = cached
+        st.session_state["dashboard_query_ranges"] = covered
+    return select_date_range(cached, start_date, end_date)
 
 @st.dialog("Carregando dados do dashboard", dismissible=False)
 def load_initial_week() -> None:
@@ -152,6 +240,9 @@ def load_initial_week() -> None:
 
     st.session_state["dashboard_filter_options"] = filter_options
     st.session_state["dashboard_data"] = results
+    st.session_state["dashboard_query_cache"] = results.copy()
+    st.session_state["dashboard_query_ranges"] = [(start_date, end_date)]
+    st.session_state["dashboard_date_range"] = (start_date, end_date)
     st.session_state["dashboard_filters"] = {
         "project": [], "environment": [], "title": [], "client_id": [],
         "validation_type": [], "result_status": [],
@@ -230,85 +321,100 @@ with st.sidebar:
     st.image(str(LOGO_PATH), use_container_width=True)
     st.divider()
     st.header("Filtros")
-    with st.container():
+    with st.form("dashboard_filters", clear_on_submit=False):
         start_date = st.date_input("Data inicial", key="filter_start_date")
-        st.button(
+        st.form_submit_button(
             "Ontem", key="set_start_yesterday", use_container_width=True,
             on_click=set_filter_date,
             args=("filter_start_date", today - timedelta(days=1)),
         )
         end_date = st.date_input("Data final", key="filter_end_date")
-        st.button(
+        st.form_submit_button(
             "Hoje", key="set_end_today", use_container_width=True,
             on_click=set_filter_date, args=("filter_end_date", today),
         )
-        projects = st.multiselect("Projeto", choices("project"))
-        environments = st.multiselect("Ambiente", choices("environment"))
+        projects = st.multiselect("Projeto", choices("project"), key="filter_projects")
+        environments = st.multiselect("Ambiente", choices("environment"), key="filter_environments")
         st.markdown("**Cenário**")
-        if st.button("Selecionar cenários", disabled=not choices("title"), use_container_width=True):
-            st.session_state["scenario_dialog_open"] = True
-        if st.session_state.get("scenario_dialog_open", False):
-            select_scenarios()
+        open_scenario_picker = st.form_submit_button(
+            "Selecionar cenários", key="open_scenario_picker",
+            disabled=not choices("title"), use_container_width=True,
+        )
         test_names = st.session_state.get("selected_scenarios", [])
         st.caption(f"{len(test_names)} cenário(s) selecionado(s)" if test_names else "Todos os cenários")
-        client_ids = st.multiselect("Cliente", choices("client_id"))
-        validation_types = st.multiselect("Tipo de validação", choices("validation_type"))
+        client_ids = st.multiselect("Cliente", choices("client_id"), key="filter_clients")
+        validation_types = st.multiselect(
+            "Tipo de validação", choices("validation_type"), key="filter_validation_types",
+        )
         statuses = st.multiselect(
             "Resultado da validação", ["failed", "passed", "info"],
-            format_func=lambda value: STATUS_LABELS[value],
+            format_func=lambda value: STATUS_LABELS[value], key="filter_statuses",
         )
-        button_area = st.empty()
-        submitted = button_area.button("Pesquisar", type="primary")
-        if st.button("Atualizar do banco", use_container_width=True, help="Ignora o cache atual e busca dados atualizados no PostgreSQL."):
-            clear_database_cache()
-            st.session_state.pop("dashboard_filter_options", None)
-            st.session_state["force_refresh_search"] = True
-            st.rerun()
-        submitted = (
-            submitted
-            or st.session_state.pop("force_refresh_search", False)
-            or auto_load_current_week
+        submitted = st.form_submit_button("Pesquisar", type="primary", use_container_width=True)
+        refresh_requested = st.form_submit_button(
+            "Atualizar do banco", use_container_width=True,
+            help="Ignora o cache atual e busca dados atualizados no PostgreSQL.",
         )
-        search_error = None
-        if submitted and auto_load_current_week:
-            st.session_state["dashboard_initial_week_loaded"] = True
-        if submitted and start_date <= end_date:
-            button_area.button("⏳ Pesquisando...", type="primary", disabled=True)
-            start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
-            end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
-            with st.spinner("Consultando resultados..."):
-                try:
-                    data = load_results(settings, start, end)
-                except (psycopg.Error, OSError) as error:
-                    detail = getattr(getattr(error, "diag", None), "message_primary", None) or str(error)
-                    sqlstate = getattr(error, "sqlstate", None)
-                    search_error = f"{sqlstate or type(error).__name__}: {detail}"
-            if search_error:
-                st.session_state["dashboard_search_error"] = search_error
-                st.rerun()
-    st.caption("As opções abrangem os dados disponíveis no banco. Ajuste os filtros e clique em Pesquisar para aplicá-los.")
 
-search_error = st.session_state.pop("dashboard_search_error", None)
-if search_error:
-    st.error(f"Não foi possível consultar o PostgreSQL de relatórios: {search_error}")
+    if open_scenario_picker:
+        st.session_state["scenario_dialog_open"] = True
+    if st.session_state.get("scenario_dialog_open", False):
+        select_scenarios()
 
-if submitted:
+    st.caption("Edite os filtros e clique em Pesquisar. Os periodos consultados ficam em cache durante esta sessao do navegador; somente dias ainda nao carregados consultam o banco. Atualizar do banco recarrega o periodo selecionado.")
+
+search_requested = submitted or refresh_requested
+search_error = None
+if search_requested:
     if start_date > end_date:
         st.error("A data inicial deve ser anterior ou igual à data final.")
         st.stop()
-    st.session_state["dashboard_initial_week_loaded"] = True
-    st.session_state["dashboard_data"] = data
-    if not data.empty:
-        for column, existing in st.session_state["dashboard_filter_options"].items():
-            st.session_state["dashboard_filter_options"][column] = sorted(
-                set(existing) | set(data[column].dropna().astype(str)), key=str.casefold
-            )
-    st.session_state["dashboard_filters"] = {
-        "project": projects, "environment": environments, "title": test_names,
-        "client_id": client_ids, "validation_type": validation_types, "result_status": statuses,
-    }
-    # Recria os widgets com as opções retornadas pela pesquisa recém-concluída.
-    st.rerun()
+    else:
+        start = datetime.combine(start_date, time.min, tzinfo=display_zone).astimezone(timezone.utc)
+        end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=display_zone).astimezone(timezone.utc)
+        try:
+            if refresh_requested:
+                clear_database_cache()
+                with st.spinner("Atualizando os dados e opcoes no PostgreSQL..."):
+                    refreshed_options = load_filter_options(settings)
+                    refreshed_data = load_results(settings, start, end)
+                # Replace session data only after both refresh queries have succeeded.
+                st.session_state["dashboard_query_cache"] = refreshed_data.copy()
+                st.session_state["dashboard_query_ranges"] = [(start_date, end_date)]
+                st.session_state["dashboard_filter_options"] = refreshed_options
+                data = refreshed_data
+            else:
+                cached_ranges = st.session_state.get("dashboard_query_ranges", [])
+                missing_ranges = missing_date_ranges(start_date, end_date, cached_ranges)
+                if missing_ranges:
+                    with st.spinner("Carregando os dias ainda nao consultados..."):
+                        data = fetch_missing_dates(start_date, end_date)
+                else:
+                    data = select_date_range(
+                        st.session_state.get("dashboard_query_cache", pd.DataFrame()),
+                        start_date, end_date,
+                    )
+
+            st.session_state["dashboard_initial_week_loaded"] = True
+            st.session_state["dashboard_data"] = data
+            st.session_state["dashboard_date_range"] = (start_date, end_date)
+            if not data.empty:
+                for column, existing in st.session_state["dashboard_filter_options"].items():
+                    st.session_state["dashboard_filter_options"][column] = sorted(
+                        set(existing) | set(data[column].dropna().astype(str)), key=str.casefold
+                    )
+            st.session_state["dashboard_filters"] = {
+                "project": projects, "environment": environments, "title": test_names,
+                "client_id": client_ids, "validation_type": validation_types,
+                "result_status": statuses,
+            }
+        except (psycopg.Error, OSError) as error:
+            detail = getattr(getattr(error, "diag", None), "message_primary", None) or str(error)
+            sqlstate = getattr(error, "sqlstate", None)
+            search_error = f"{sqlstate or type(error).__name__}: {detail}"
+
+if search_error:
+    st.error(f"Não foi possível consultar o PostgreSQL de relatórios: {search_error}")
 
 if data is None:
     st.info("Selecione o período e clique em Pesquisar para consultar os resultados.")
@@ -331,28 +437,47 @@ indicator_data = {
 }
 
 
+def history_x_encoding(history: pd.DataFrame):
+    """Use a continuous time axis and reduce tick labels for longer periods."""
+    selected_range = st.session_state.get("dashboard_date_range")
+    if selected_range:
+        range_start, range_end = selected_range
+    else:
+        range_start = pd.to_datetime(history["execution_day"]).min().date()
+        range_end = pd.to_datetime(history["execution_day"]).max().date()
+
+    span_days = max(1, (range_end - range_start).days + 1)
+    tick_count = min(12, max(4, (span_days + 6) // 7))
+    range_end_exclusive = range_end + timedelta(days=1)
+    return alt.X(
+        "execution_date:T", title="Dia da execucao",
+        scale=alt.Scale(domain=[pd.Timestamp(range_start), pd.Timestamp(range_end_exclusive)]),
+        axis=alt.Axis(
+            format="%d/%m", tickCount=tick_count, labelAngle=-25,
+            labelOverlap=True, tickSize=0, domain=False,
+        ),
+    )
+
+
 def render_daily_history(frame: pd.DataFrame, title: str, chart_key: str) -> None:
-    """Exibe falhas e aprovações por dia, com uma única categoria por data."""
+    """Exibe falhas e aprovacoes por dia, mantendo a escala legivel em periodos longos."""
     with st.container(border=True):
         st.subheader(title)
         history = daily_validation_history(frame, display_zone)
         if history.empty:
-            st.info("Não há execuções no período e projeto selecionados para compor este histórico.")
+            st.info("Nao ha execucoes no periodo e projeto selecionados para compor este historico.")
             return
 
-        history["day_label"] = pd.to_datetime(history["execution_day"]).dt.strftime("%d/%m/%Y")
-        day_order = history["day_label"].drop_duplicates().tolist()
+        history["execution_date"] = pd.to_datetime(history["execution_day"])
+        history["day_label"] = history["execution_date"].dt.strftime("%d/%m/%Y")
         history["Resultado"] = history["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
         colors = alt.Scale(
             domain=["Falhas", "Aprovadas"],
             range=["#F45B69", "#00C087"],
         )
-        x = alt.X(
-            "day_label:O", title="Dia da execução", sort=day_order,
-            axis=alt.Axis(labelAngle=-30, labelOverlap=True, tickSize=0, domain=False),
-        )
+        x = history_x_encoding(history)
         y = alt.Y(
-            "validations:Q", title="Quantidade de validações",
+            "validations:Q", title="Quantidade de validacoes",
             scale=alt.Scale(domainMin=0), stack=None,
         )
         base = alt.Chart(history).encode(
@@ -363,7 +488,7 @@ def render_daily_history(frame: pd.DataFrame, title: str, chart_key: str) -> Non
             tooltip=[
                 alt.Tooltip("day_label:N", title="Dia"),
                 alt.Tooltip("Resultado:N"),
-                alt.Tooltip("validations:Q", title="Validações"),
+                alt.Tooltip("validations:Q", title="Validacoes"),
             ],
         )
         glow = base.mark_line(interpolate="monotone", strokeWidth=9, opacity=0.12)
@@ -481,11 +606,11 @@ if st.session_state.get("failure_history_detail"):
         if history.empty:
             st.info("Nao ha historico de validacoes para este cliente no periodo selecionado.")
         else:
-            history["day_label"] = pd.to_datetime(history["execution_day"]).dt.strftime("%d/%m/%Y")
-            day_order = history["day_label"].drop_duplicates().tolist()
+            history["execution_date"] = pd.to_datetime(history["execution_day"])
+            history["day_label"] = history["execution_date"].dt.strftime("%d/%m/%Y")
             history["Resultado"] = history["result_status"].map({"failed": "Falhas", "passed": "Aprovadas"})
             client_chart = alt.Chart(history).mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5, size=22).encode(
-                x=alt.X("day_label:O", title="Dia da execucao", sort=day_order, axis=alt.Axis(labelAngle=-35, labelOverlap=False)),
+                x=history_x_encoding(history),
                 xOffset=alt.XOffset("Resultado:N", sort=["Falhas", "Aprovadas"]),
                 y=alt.Y("validations:Q", title="Quantidade de validacoes", scale=alt.Scale(domainMin=0)),
                 color=alt.Color("Resultado:N", title="Resultado", scale=alt.Scale(
