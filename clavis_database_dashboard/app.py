@@ -52,6 +52,12 @@ except (ValueError, ZoneInfoNotFoundError) as error:
 
 today = datetime.now(display_zone).date()
 data = st.session_state.get("dashboard_data")
+st.session_state.setdefault("filter_start_date", today - timedelta(days=30))
+st.session_state.setdefault("filter_end_date", today)
+
+
+def set_filter_date(widget_key: str, selected_date) -> None:
+    st.session_state[widget_key] = selected_date
 
 
 def without_mapping_results(frame: pd.DataFrame) -> pd.DataFrame:
@@ -130,8 +136,23 @@ def select_scenarios() -> None:
 with st.sidebar:
     st.header("Filtros")
     with st.container():
-        start_date = st.date_input("Data inicial", value=today - timedelta(days=30))
-        end_date = st.date_input("Data final", value=today)
+        start_column, yesterday_column = st.columns([3, 1])
+        with start_column:
+            start_date = st.date_input("Data inicial", key="filter_start_date")
+        with yesterday_column:
+            st.button(
+                "Ontem", key="set_start_yesterday", use_container_width=True,
+                on_click=set_filter_date,
+                args=("filter_start_date", today - timedelta(days=1)),
+            )
+        end_column, today_column = st.columns([3, 1])
+        with end_column:
+            end_date = st.date_input("Data final", key="filter_end_date")
+        with today_column:
+            st.button(
+                "Hoje", key="set_end_today", use_container_width=True,
+                on_click=set_filter_date, args=("filter_end_date", today),
+            )
         projects = st.multiselect("Projeto", choices("project"))
         environments = st.multiselect("Ambiente", choices("environment"))
         st.markdown("**Cenário**")
