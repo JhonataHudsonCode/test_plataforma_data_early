@@ -86,10 +86,20 @@ def _load_filter_options_cached(settings: DatabaseSettings, show_mapping: bool) 
     result_filter = sql.SQL("") if show_mapping else sql.SQL("""
         AND COALESCE(v.validation_type, '') NOT ILIKE '%mapping%'
     """)
+    run_filter = sql.SQL("") if show_mapping else sql.SQL("""
+        AND EXISTS (
+            SELECT 1 FROM {scenarios} AS eligible
+            WHERE eligible.run_id = r.id
+              AND COALESCE(eligible.title, '') NOT ILIKE '%mapping%'
+              AND COALESCE(eligible.test_name, '') NOT ILIKE '%mapping%'
+        )
+    """).format(scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"))
     query = sql.SQL("""
-        SELECT DISTINCT 'project' AS kind, project AS value FROM {runs} WHERE project IS NOT NULL
+        SELECT DISTINCT 'project' AS kind, r.project AS value
+        FROM {runs} AS r WHERE r.project IS NOT NULL {run_filter}
         UNION ALL
-        SELECT DISTINCT 'environment' AS kind, environment AS value FROM {runs} WHERE environment IS NOT NULL
+        SELECT DISTINCT 'environment' AS kind, r.environment AS value
+        FROM {runs} AS r WHERE r.environment IS NOT NULL {run_filter}
         UNION ALL
         SELECT DISTINCT 'title' AS kind, s.title AS value
         FROM {scenarios} AS s WHERE s.title IS NOT NULL {scenario_filter}
@@ -109,6 +119,7 @@ def _load_filter_options_cached(settings: DatabaseSettings, show_mapping: bool) 
         results=sql.Identifier(settings.schema, "qa_test_results"),
         scenario_filter=scenario_filter,
         result_filter=result_filter,
+        run_filter=run_filter,
     )
     options = {key: [] for key in ("project", "environment", "title", "client_id", "validation_type")}
     with psycopg.connect(
@@ -133,21 +144,19 @@ def load_filter_options(settings: DatabaseSettings) -> dict[str, list[str]]:
 @st.cache_data(ttl=900, max_entries=8, show_spinner=False)
 def _load_results_cached(settings: DatabaseSettings, start: datetime, end: datetime, show_mapping: bool) -> pd.DataFrame:
     """Cache de resultados de 15 minutos; considera a flag de mapping na chave."""
-    scenario_filter = sql.SQL("") if show_mapping else sql.SQL("""
-        AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
-        AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
-    """)
     result_filter = sql.SQL("") if show_mapping else sql.SQL("""
         AND COALESCE(v.validation_type, '') NOT ILIKE '%mapping%'
     """)
-    run_filter = sql.SQL("") if show_mapping else sql.SQL("""
-        AND EXISTS (
-            SELECT 1 FROM {scenarios} AS eligible
-            WHERE eligible.run_id = r.id
-              AND COALESCE(eligible.title, '') NOT ILIKE '%mapping%'
-              AND COALESCE(eligible.test_name, '') NOT ILIKE '%mapping%'
+    if show_mapping:
+        scenario_join = sql.SQL("LEFT JOIN {scenarios} AS s ON s.run_id = r.id").format(
+            scenarios=sql.Identifier(settings.schema, "qa_test_scenarios")
         )
-    """).format(scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"))
+    else:
+        scenario_join = sql.SQL("""
+            JOIN {scenarios} AS s ON s.run_id = r.id
+             AND COALESCE(s.title, '') NOT ILIKE '%mapping%'
+             AND COALESCE(s.test_name, '') NOT ILIKE '%mapping%'
+        """).format(scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"))
     query = sql.SQL("""
         SELECT r.id AS run_id, r.project, r.environment, r.started_at, r.finished_at,
                r.duration_ms AS run_duration_ms, r.status AS run_status, r.exit_code,
@@ -160,18 +169,16 @@ def _load_results_cached(settings: DatabaseSettings, start: datetime, end: datet
                v.comparison_limit_percent, v.max_increase_percent, v.max_decrease_percent,
                v.previous_date, v.comparison_current_date AS "current_date", v.reason_code
         FROM {runs} AS r
-        LEFT JOIN {scenarios} AS s ON s.run_id = r.id {scenario_filter}
+        {scenario_join}
         LEFT JOIN {results} AS v ON v.scenario_id = s.id {result_filter}
         WHERE r.started_at >= %s AND r.started_at < %s
-        {run_filter}
         ORDER BY r.started_at DESC, s.id, v.sequence
     """).format(
         runs=sql.Identifier(settings.schema, "qa_test_runs"),
         scenarios=sql.Identifier(settings.schema, "qa_test_scenarios"),
         results=sql.Identifier(settings.schema, "qa_test_results"),
-        scenario_filter=scenario_filter,
+        scenario_join=scenario_join,
         result_filter=result_filter,
-        run_filter=run_filter,
     )
     with psycopg.connect(
         host=settings.host, port=settings.port, dbname=settings.database,

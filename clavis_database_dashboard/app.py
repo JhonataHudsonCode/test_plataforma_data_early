@@ -52,6 +52,13 @@ except (ValueError, ZoneInfoNotFoundError) as error:
 
 today = datetime.now(display_zone).date()
 data = st.session_state.get("dashboard_data")
+previous_mapping_setting = st.session_state.get("_mapping_setting")
+if previous_mapping_setting is not None and previous_mapping_setting != show_mapping_results:
+    clear_database_cache()
+    for key in ("dashboard_data", "dashboard_filters", "dashboard_filter_options", "selected_scenarios"):
+        st.session_state.pop(key, None)
+    data = None
+st.session_state["_mapping_setting"] = show_mapping_results
 current_week_start = today - timedelta(days=today.weekday())
 auto_load_current_week = not st.session_state.get("dashboard_initial_week_loaded", False)
 if auto_load_current_week:
@@ -66,26 +73,14 @@ def set_filter_date(widget_key: str, selected_date) -> None:
     st.session_state[widget_key] = selected_date
 
 
-def without_mapping_results(frame: pd.DataFrame) -> pd.DataFrame:
-    """Remove testes e resultados de mapping antes de calcular qualquer indicador."""
-    if frame.empty:
-        return frame
-    mapping_rows = pd.Series(False, index=frame.index)
-    for column in ("title", "test_name", "validation_type"):
-        if column in frame:
-            mapping_rows |= frame[column].fillna("").astype(str).str.contains("mapping", case=False, regex=False)
-    return frame.loc[~mapping_rows].copy()
-
-
-if not show_mapping_results and data is not None:
-    data = without_mapping_results(data)
-
 if "dashboard_filter_options" not in st.session_state:
     try:
         with st.spinner("Carregando opções dos filtros..."):
             st.session_state["dashboard_filter_options"] = load_filter_options(settings)
-    except (psycopg.Error, OSError):
-        st.error("Não foi possível carregar os filtros do PostgreSQL de relatórios. Confira a conexão e tente novamente.")
+    except (psycopg.Error, OSError) as error:
+        detail = getattr(getattr(error, "diag", None), "message_primary", None) or str(error)
+        sqlstate = getattr(error, "sqlstate", None)
+        st.error(f"Falha ao carregar filtros do PostgreSQL ({sqlstate or type(error).__name__}): {detail}")
         if st.button("Tentar carregar filtros novamente"):
             st.rerun()
         st.stop()
@@ -180,7 +175,7 @@ with st.sidebar:
             or st.session_state.pop("force_refresh_search", False)
             or auto_load_current_week
         )
-        search_error = False
+        search_error = None
         if submitted and auto_load_current_week:
             st.session_state["dashboard_initial_week_loaded"] = True
         if submitted and start_date <= end_date:
@@ -190,15 +185,18 @@ with st.sidebar:
             with st.spinner("Consultando resultados..."):
                 try:
                     data = load_results(settings, start, end)
-                except (psycopg.Error, OSError):
-                    search_error = True
+                except (psycopg.Error, OSError) as error:
+                    detail = getattr(getattr(error, "diag", None), "message_primary", None) or str(error)
+                    sqlstate = getattr(error, "sqlstate", None)
+                    search_error = f"{sqlstate or type(error).__name__}: {detail}"
             if search_error:
-                st.session_state["dashboard_search_error"] = True
+                st.session_state["dashboard_search_error"] = search_error
                 st.rerun()
     st.caption("As opções abrangem os dados disponíveis no banco. Ajuste os filtros e clique em Pesquisar para aplicá-los.")
 
-if st.session_state.pop("dashboard_search_error", False):
-    st.error("Não foi possível consultar o PostgreSQL de relatórios. Confira conexão, permissões e schema.")
+search_error = st.session_state.pop("dashboard_search_error", None)
+if search_error:
+    st.error(f"Não foi possível consultar o PostgreSQL de relatórios: {search_error}")
 
 if submitted:
     if start_date > end_date:
