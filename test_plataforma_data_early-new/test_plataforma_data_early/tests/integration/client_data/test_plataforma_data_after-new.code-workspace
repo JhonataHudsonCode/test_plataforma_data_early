@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"name": "test_plataforma_data_after-new",
+			"path": "../../../../../test_plataforma_data_after-new"
+		},
+		{
+			"name": "clavis_database_dashboard",
+			"path": "../../../../../../clavis_database_dashboard"
+		},
+		{
+			"name": "test_plataforma_data_early-new",
+			"path": "../../../.."
+		},
+		{
+			"name": "test_plataforma_data_early",
+			"path": "../../../../../../test_plataforma_data_early"
+		}
+	],
+	"settings": {}
+}
