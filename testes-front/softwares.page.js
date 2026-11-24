@@ -10,7 +10,10 @@ export class SoftwaresPage {
   constructor(page, elementsFile = ELEMENTS_FILE) {
     this.page = page;
     const definition = parse(readFileSync(elementsFile, 'utf8'));
-    this.elements = definition.elementos;
+    const source = definition.elementos ?? definition;
+    this.elements = Object.fromEntries(
+      Object.entries(source).filter(([, value]) => value && typeof value === 'object' && value.locator),
+    );
   }
 
   element(name) {

@@ -180,19 +180,12 @@
   }
 
   function gerarConteudoYaml() {
-    const elementos = [...mapeamentos.entries()].map(([nome, elemento]) => [
-      `  ${JSON.stringify(nome)}:`,
-      `    locator: ${JSON.stringify(elemento.locator)}`,
-      `    text: ${JSON.stringify(elemento.text)}`,
-      `    type: ${JSON.stringify(elemento.type)}`,
-    ].join('\n'));
-
-    return [
-      `pagina: ${JSON.stringify(document.title || window.location.pathname)}`,
-      'elementos:',
-      ...elementos,
-      '',
-    ].join('\n');
+    return [...mapeamentos.entries()].map(([nome, elemento]) => [
+      `${/^[A-Za-z_][A-Za-z0-9_-]*$/.test(nome) ? nome : JSON.stringify(nome)}:`,
+      `  locator: ${JSON.stringify(elemento.locator)}`,
+      `  text: ${JSON.stringify(elemento.text)}`,
+      `  type: ${JSON.stringify(elemento.type)}`,
+    ].join('\n')).join('\n');
   }
 
   function baixarMapeamentoYaml() {
@@ -202,17 +195,11 @@
     }
 
     const conteudo = gerarConteudoYaml();
-    const slug = (document.title || 'pagina')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9_-]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .toLowerCase() || 'pagina';
     const arquivo = new Blob([conteudo], { type: 'text/yaml;charset=utf-8' });
     const url = URL.createObjectURL(arquivo);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `elementos_${slug}.yml`;
+    link.download = 'mapeamento.yml';
     document.body.appendChild(link);
     link.click();
     link.remove();
