@@ -173,7 +173,7 @@
 
     if (!identificador) {
       sequenciaNomes++;
-      return `elemento_${sequenciaNomes}`;
+      return `${elemento.localName}Elemento${sequenciaNomes}`;
     }
 
     const palavras = identificador
@@ -190,7 +190,8 @@
       .join('') || 'elemento';
 
     sequenciaNomes++;
-    return base;
+    const tipo = elemento.localName;
+    return `${tipo}${base.charAt(0).toUpperCase()}${base.slice(1)}`;
   }
 
   function gerarConteudoYaml() {
