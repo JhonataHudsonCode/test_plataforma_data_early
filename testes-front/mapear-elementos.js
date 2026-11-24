@@ -100,55 +100,9 @@
     return (elemento.getAttribute('class') || '').trim().split(/\s+/)[0] || '';
   }
 
-  function caminhoRelativo(ancora, elemento) {
-    const partes = [];
-    let atual = elemento;
-
-    while (atual && atual !== ancora && atual.nodeType === Node.ELEMENT_NODE) {
-      const tag = atual.localName;
-      let posicao = 1;
-      let anterior = atual.previousElementSibling;
-
-      while (anterior) {
-        if (anterior.localName === tag) {
-          posicao++;
-        }
-
-        anterior = anterior.previousElementSibling;
-      }
-
-      partes.unshift(`${tag}[${posicao}]`);
-      atual = atual.parentElement;
-    }
-
-    if (atual !== ancora) return null;
-    return partes.length ? `/${partes.join('/')}` : '';
-  }
-
   function gerarXPath(elemento) {
     const tag = elemento.localName;
     const texto = obterTextoDoElemento(elemento);
-
-    if (tag === 'div' && elemento.querySelector('ul > li')) {
-      const classe = primeiraClasse(elemento);
-      if (classe) {
-        const condicaoTexto = texto
-          ? ` and contains(normalize-space(.), ${literalXPath(texto)})`
-          : '';
-        const xpathClasse =
-          `//div[contains(@class, ${literalXPath(classe)})${condicaoTexto}]`;
-        const locator = xpathQueLocalizaElemento(xpathClasse, elemento);
-        if (locator) return locator;
-      }
-    }
-
-    // Prefere o texto visível mesmo quando o elemento também possui id.
-    if (texto) {
-      const xpathTexto = `//${tag}[contains(normalize-space(.), ${literalXPath(texto)})]`;
-      const locator = xpathQueLocalizaElemento(xpathTexto, elemento);
-      if (locator) return locator;
-    }
-
     const atributos = [
       'id',
       'data-testid',
@@ -160,6 +114,48 @@
       'role',
     ];
 
+    // Para componentes styled-components, usa somente a primeira classe do className.
+    const classeElemento = primeiraClasse(elemento);
+    if (classeElemento) {
+      const condicaoTexto = texto
+        ? `[contains(normalize-space(.), ${literalXPath(texto)})]`
+        : '';
+      const xpathClasse =
+        `//${tag}[contains(@class, ${literalXPath(classeElemento)})]${condicaoTexto}`;
+      const locator = xpathQueLocalizaElemento(xpathClasse, elemento);
+      if (locator) return locator;
+    }
+
+    // Se o elemento não tem classe, ancora no ancestral styled-components mais próximo.
+    let ancestral = elemento.parentElement;
+    while (ancestral && ancestral !== document.body) {
+      const classeAncestral = primeiraClasse(ancestral);
+      if (classeAncestral) {
+        let restante = `//${tag}`;
+        if (texto) {
+          restante += `[contains(normalize-space(.), ${literalXPath(texto)})]`;
+        } else {
+          const atributo = atributos.find(nome => elemento.getAttribute(nome));
+          if (atributo) {
+            restante += `[@${atributo}=${literalXPath(elemento.getAttribute(atributo))}]`;
+          }
+        }
+
+        const xpathAncorado =
+          `//${ancestral.localName}[contains(@class, ${literalXPath(classeAncestral)})]${restante}`;
+        const locator = xpathQueLocalizaElemento(xpathAncorado, elemento);
+        if (locator) return locator;
+      }
+      ancestral = ancestral.parentElement;
+    }
+
+    // Fallbacks para elementos sem classe styled-components.
+    if (texto) {
+      const xpathTexto = `//${tag}[contains(normalize-space(.), ${literalXPath(texto)})]`;
+      const locator = xpathQueLocalizaElemento(xpathTexto, elemento);
+      if (locator) return locator;
+    }
+
     for (const atributo of atributos) {
       const valor = elemento.getAttribute(atributo);
       if (!valor) continue;
@@ -169,38 +165,8 @@
       if (locator) return locator;
     }
 
-    // Procura o ancestral mais próximo com atributo estável ou texto único.
-    let ancora = elemento.parentElement;
-    while (ancora && ancora !== document.body) {
-      const caminho = caminhoRelativo(ancora, elemento);
-      if (caminho) {
-        for (const atributo of atributos) {
-          const valor = ancora.getAttribute(atributo);
-          if (!valor) continue;
-
-          const xpathAncora = `//${ancora.localName}[@${atributo}=${literalXPath(valor)}]`;
-          const xpathRelativo = `${xpathAncora}${caminho}`;
-          const locator = xpathQueLocalizaElemento(xpathRelativo, elemento);
-          if (locator) return locator;
-        }
-
-        const textoAncora = (ancora.innerText || ancora.textContent || '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (textoAncora) {
-          const xpathTextoAncora =
-            `//${ancora.localName}[normalize-space(.)=${literalXPath(textoAncora)}]`;
-          const xpathRelativo = `${xpathTextoAncora}${caminho}`;
-          const locator = xpathQueLocalizaElemento(xpathRelativo, elemento);
-          if (locator) return locator;
-        }
-      }
-      ancora = ancora.parentElement;
-    }
-
-    // Fallback relativo ao body: mantém o XPath começando com // e evita /html.
-    const caminhoBody = caminhoRelativo(document.body, elemento);
-    return caminhoBody ? `//body${caminhoBody}` : `//${tag}`;
+    // Mantém o locator curto quando não houver classe nem outro identificador.
+    return elemento === document.body ? '//body' : `//body//${tag}`;
   }
 
   function gerarNomeSugerido(elemento) {
