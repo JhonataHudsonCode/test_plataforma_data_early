@@ -63,13 +63,24 @@
     return `concat(${argumentos.join(', ')})`;
   }
 
-  function xpathAbsoluto(elemento) {
-    const partes = [];
+  function contarXPath(xpath) {
+    return document.evaluate(
+      xpath,
+      document,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null,
+    ).snapshotLength;
+  }
 
-    while (elemento && elemento.nodeType === Node.ELEMENT_NODE) {
-      const tag = elemento.localName;
+  function caminhoRelativo(ancora, elemento) {
+    const partes = [];
+    let atual = elemento;
+
+    while (atual && atual !== ancora && atual.nodeType === Node.ELEMENT_NODE) {
+      const tag = atual.localName;
       let posicao = 1;
-      let anterior = elemento.previousElementSibling;
+      let anterior = atual.previousElementSibling;
 
       while (anterior) {
         if (anterior.localName === tag) {
@@ -80,10 +91,11 @@
       }
 
       partes.unshift(`${tag}[${posicao}]`);
-      elemento = elemento.parentElement;
+      atual = atual.parentElement;
     }
 
-    return '/' + partes.join('/');
+    if (atual !== ancora) return null;
+    return partes.length ? `/${partes.join('/')}` : '';
   }
 
   function gerarXPath(elemento) {
@@ -96,6 +108,7 @@
       'aria-label',
       'placeholder',
       'title',
+      'role',
     ];
 
     for (const atributo of atributos) {
@@ -103,20 +116,47 @@
       if (!valor) continue;
 
       const xpath = `//${tag}[@${atributo}=${literalXPath(valor)}]`;
-      const resultado = document.evaluate(
-        xpath,
-        document,
-        null,
-        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-        null,
-      );
-
-      if (resultado.snapshotLength === 1) {
-        return xpath;
-      }
+      if (contarXPath(xpath) === 1) return xpath;
     }
 
-    return xpathAbsoluto(elemento);
+    const texto = (elemento.innerText || elemento.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (texto) {
+      const xpathTexto = `//${tag}[normalize-space(.)=${literalXPath(texto)}]`;
+      if (contarXPath(xpathTexto) === 1) return xpathTexto;
+    }
+
+    // Procura o ancestral mais próximo com atributo estável ou texto único.
+    let ancora = elemento.parentElement;
+    while (ancora && ancora !== document.body) {
+      const caminho = caminhoRelativo(ancora, elemento);
+      if (caminho) {
+        for (const atributo of atributos) {
+          const valor = ancora.getAttribute(atributo);
+          if (!valor) continue;
+
+          const xpathAncora = `//${ancora.localName}[@${atributo}=${literalXPath(valor)}]`;
+          const xpathRelativo = `${xpathAncora}${caminho}`;
+          if (contarXPath(xpathRelativo) === 1) return xpathRelativo;
+        }
+
+        const textoAncora = (ancora.innerText || ancora.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (textoAncora) {
+          const xpathTextoAncora =
+            `//${ancora.localName}[normalize-space(.)=${literalXPath(textoAncora)}]`;
+          const xpathRelativo = `${xpathTextoAncora}${caminho}`;
+          if (contarXPath(xpathRelativo) === 1) return xpathRelativo;
+        }
+      }
+      ancora = ancora.parentElement;
+    }
+
+    // Fallback relativo ao body: mantém o XPath começando com // e evita /html.
+    const caminhoBody = caminhoRelativo(document.body, elemento);
+    return caminhoBody ? `//body${caminhoBody}` : `//${tag}`;
   }
 
   function gerarNomeSugerido(elemento) {
