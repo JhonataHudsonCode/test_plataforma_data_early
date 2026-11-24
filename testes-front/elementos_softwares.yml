@@ -1,0 +1,202 @@
+pagina: softwares
+elementos:
+  titulo_e_atualizacao:
+    strategy: getByText
+    locator: "Softwares Última atualização"
+    text: "Softwares Última atualização"
+    type: text
+
+  hosts_monitorados:
+    strategy: getByTitle
+    locator: "Hosts monitorados"
+    text: "Hosts monitorados"
+    type: title
+
+  hosts_com_softwares_nao_homologados:
+    strategy: getByTitle
+    locator: "Hosts com softwares não"
+    text: "Hosts com softwares não homologados"
+    type: title
+
+  hosts_sem_softwares_obrigatorios:
+    strategy: getByText
+    locator: "0Hosts sem softwares obrigatório"
+    text: "0 Hosts sem softwares obrigatórios instalados"
+    type: text
+
+  softwares_nao_homologados_card:
+    strategy: getByTitle
+    locator: "Softwares não homologados"
+    exact: true
+    text: "Softwares não homologados"
+    type: title
+
+  visao_geral_dos_softwares:
+    strategy: locator
+    locator: "div"
+    has_text: "Visão geral dos softwares"
+    exact: true
+    text: "Visão geral dos softwares"
+    type: div
+
+  total_e_legenda_do_grafico:
+    strategy: locator
+    locator: "div"
+    has_text: "13.497totalSoftwares homologados (11681)Softwares não homologados (1816)"
+    text: "13.497 total; Softwares homologados (11681); Softwares não homologados (1816)"
+    type: div
+
+  grafico_visao_geral:
+    strategy: locator
+    locator: ".sc-fG0olv"
+    nth: 0
+    text: "Gráfico de visão geral dos softwares"
+    type: chart
+
+  informacao_grafico_visao_geral:
+    strategy: locator
+    locator: ".sc-hlGDCY.kFDrRC > #card-more-info > svg"
+    nth: 0
+    text: "Ícone de informações do gráfico de visão geral"
+    type: svg
+
+  filtro_grafico_hosts_nao_homologados:
+    strategy: getByRole
+    locator: button
+    nth: 1
+    text: "Botão de filtro do gráfico de hosts com softwares não homologados"
+    type: button
+
+  grafico_hosts_nao_homologados:
+    strategy: locator
+    locator: "div"
+    has_text: "22/10 23/10 24/10 25/10 26/10 27/10 100 % 25 % 50 % 75 % 100 %"
+    text: "Gráfico percentual de hosts monitorados com softwares não homologados"
+    type: chart
+
+  segundo_grafico:
+    strategy: locator
+    locator: "div:nth-child(2) > .sc-fG0olv"
+    nth: 0
+    text: "Gráfico percentual de hosts sem softwares obrigatórios"
+    type: chart
+
+  filtro_grafico_hosts_sem_softwares_obrigatorios:
+    strategy: getByRole
+    locator: button
+    nth: 2
+    text: "Botão de filtro do gráfico de hosts sem softwares obrigatórios"
+    type: button
+
+  informacao_grafico_hosts_sem_softwares_obrigatorios:
+    strategy: locator
+    locator: "div:nth-child(2) > .sc-fG0olv > #card-title > #card-more-info > svg"
+    nth: 0
+    text: "Ícone de informações do gráfico de hosts sem softwares obrigatórios"
+    type: svg
+
+  grafico_hosts_sem_softwares_obrigatorios:
+    strategy: locator
+    locator: "div"
+    has_text: "22/10 23/10 24/10 25/10 26/10 27/10 100 % 1 % 2 % 3 % 4 %"
+    text: "Gráfico percentual de hosts sem softwares obrigatórios"
+    type: chart
+
+  tabela_top_hosts:
+    strategy: locator
+    locator: ".sc-bqCNFN > .sc-gJbFto.iWETXT"
+    text: "Tabela de Top Hosts"
+    type: table
+
+  titulo_top_hosts_com_softwares_nao_homologados:
+    strategy: getByText
+    locator: "Top Hosts com softwares não"
+    text: "Top Hosts com softwares não homologados"
+    type: text
+
+  titulo_top_hosts_sem_softwares:
+    strategy: getByText
+    locator: "Top Hosts sem softwares"
+    text: "Top Hosts sem softwares obrigatórios"
+    type: text
+
+  host_win_fk203aqnfjn:
+    strategy: getByText
+    locator: "win-fk203aqnfjn 0vivsaude-ctm"
+    text: "win-fk203aqnfjn 0vivsaude-ctm"
+    type: text
+
+  host_bnsvher843_mac271:
+    strategy: getByText
+    locator: "bnsvher843.hering 488mac271"
+    text: "bnsvher843.hering 488mac271"
+    type: text
+
+  card_top_hosts:
+    strategy: locator
+    locator: ".sc-bqCNFN > .sc-gJbFto.iWETXT.card > .sc-fG0olv"
+    text: "Cartão com dados de Top Hosts"
+    type: card
+
+  grafico_top_hosts:
+    strategy: locator
+    locator: ".sc-fG0olv.kJsrYd"
+    text: "Gráfico de Top Hosts"
+    type: chart
+
+  cabecalho_host_classificacao_importancia:
+    strategy: getByText
+    locator: "HostClassificaçãoImportância"
+    text: "Host; Classificação; Importância"
+    type: table-header
+
+  secao_hosts:
+    strategy: locator
+    locator: "div"
+    has_text: "Hosts"
+    exact: true
+    text: "Hosts"
+    type: div
+
+  coluna_classificacao:
+    strategy: getByText
+    locator: "Classificação"
+    text: "Classificação"
+    type: text
+
+  coluna_importancia:
+    strategy: getByText
+    locator: "Importância"
+    text: "Importância"
+    type: text
+
+  coluna_total:
+    strategy: getByTitle
+    locator: "Total"
+    text: "Total"
+    type: title
+
+  softwares_obrigatorios_faltantes:
+    strategy: getByText
+    locator: "Softwares Obrigatórios Faltantes"
+    text: "Softwares Obrigatórios Faltantes"
+    type: text
+
+  softwares_homologados:
+    strategy: getByText
+    locator: "Softwares homologados"
+    exact: true
+    text: "Softwares homologados"
+    type: text
+
+  softwares_nao_homologados:
+    strategy: getByText
+    locator: "Soft. não homologados"
+    text: "Soft. não homologados"
+    type: text
+
+  host_bnsvher843_detalhe:
+    strategy: getByText
+    locator: "bnsvher843.hering---14460958488ip-10-7-55-49.ec2.internalserver cri"
+    text: "bnsvher843.hering (detalhe do host; texto truncado no print)"
+    type: text

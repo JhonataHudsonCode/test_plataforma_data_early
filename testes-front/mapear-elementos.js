@@ -154,8 +154,16 @@
     }
 
     const xpath = gerarXPath(elemento);
-    // JSON.stringify produz aspas e escapes válidos para o valor YAML.
-    const linhaYaml = `${JSON.stringify(nome)}: ${JSON.stringify(xpath)}`;
+    const texto = (elemento.innerText || elemento.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // JSON.stringify produz strings entre aspas válidas para valores YAML.
+    const linhaYaml = [
+      `${JSON.stringify(nome)}:`,
+      `  locator: ${JSON.stringify(xpath)}`,
+      `  text: ${JSON.stringify(texto)}`,
+      `  type: ${JSON.stringify(elemento.localName)}`,
+    ].join('\n');
 
     console.log('🎯 Elemento:', elemento);
     console.log('📋 YAML:');
