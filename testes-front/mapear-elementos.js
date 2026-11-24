@@ -2,6 +2,7 @@
   window.pararMapeamento?.();
   let blocoSelecao;
   let elementoDestacado;
+  let sequenciaNomes = 0;
 
   function obterBlocoSelecao() {
     if (blocoSelecao) return blocoSelecao;
@@ -118,6 +119,25 @@
     return xpathAbsoluto(elemento);
   }
 
+  function gerarNomeSugerido(elemento) {
+    const identificador =
+      elemento.id ||
+      elemento.getAttribute('data-testid') ||
+      elemento.getAttribute('data-test') ||
+      elemento.getAttribute('aria-label') ||
+      elemento.getAttribute('title') ||
+      elemento.localName;
+    const base = identificador
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase() || 'elemento';
+
+    sequenciaNomes++;
+    return `${base}_${sequenciaNomes}`;
+  }
+
   async function selecionar(evento) {
     evento.preventDefault();
     evento.stopPropagation();
@@ -125,19 +145,17 @@
 
     const elemento = evento.target;
     destacar(elemento);
-    const nome = prompt(
-      'Digite o nome do elemento no YAML:',
-      elemento.id || elemento.localName,
-    );
+    const nomeSugerido = gerarNomeSugerido(elemento);
+    const nomeDigitado = prompt('Digite o nome do elemento no YAML:', nomeSugerido);
+    const nome = nomeDigitado?.trim() || nomeSugerido;
 
-    if (!nome?.trim()) {
-      console.log('⚠️ Mapeamento cancelado para este elemento.');
-      return;
+    if (!nomeDigitado?.trim()) {
+      console.log(`ℹ️ Usando o nome sugerido: ${nome}`);
     }
 
     const xpath = gerarXPath(elemento);
     // JSON.stringify produz aspas e escapes válidos para o valor YAML.
-    const linhaYaml = `${JSON.stringify(nome.trim())}: ${JSON.stringify(xpath)}`;
+    const linhaYaml = `${JSON.stringify(nome)}: ${JSON.stringify(xpath)}`;
 
     console.log('🎯 Elemento:', elemento);
     console.log('📋 YAML:');
