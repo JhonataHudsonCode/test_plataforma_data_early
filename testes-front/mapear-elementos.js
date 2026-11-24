@@ -1,8 +1,9 @@
 (() => {
-  window.pararMapeamento?.();
+  window.pararMapeamento?.(false);
   let blocoSelecao;
   let elementoDestacado;
   let sequenciaNomes = 0;
+  const mapeamentos = new Map();
 
   function obterBlocoSelecao() {
     if (blocoSelecao) return blocoSelecao;
@@ -178,6 +179,47 @@
     return `${base}_${sequenciaNomes}`;
   }
 
+  function gerarConteudoYaml() {
+    const elementos = [...mapeamentos.entries()].map(([nome, elemento]) => [
+      `  ${JSON.stringify(nome)}:`,
+      `    locator: ${JSON.stringify(elemento.locator)}`,
+      `    text: ${JSON.stringify(elemento.text)}`,
+      `    type: ${JSON.stringify(elemento.type)}`,
+    ].join('\n'));
+
+    return [
+      `pagina: ${JSON.stringify(document.title || window.location.pathname)}`,
+      'elementos:',
+      ...elementos,
+      '',
+    ].join('\n');
+  }
+
+  function baixarMapeamentoYaml() {
+    if (mapeamentos.size === 0) {
+      console.log('⚠️ Nenhum elemento foi mapeado ainda.');
+      return;
+    }
+
+    const conteudo = gerarConteudoYaml();
+    const slug = (document.title || 'pagina')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase() || 'pagina';
+    const arquivo = new Blob([conteudo], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `elementos_${slug}.yml`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    console.log(`✅ Arquivo ${link.download} gerado com ${mapeamentos.size} elemento(s).`);
+  }
+
   async function selecionar(evento) {
     evento.preventDefault();
     evento.stopPropagation();
@@ -187,33 +229,40 @@
     destacar(elemento);
     const nomeSugerido = gerarNomeSugerido(elemento);
     const nomeDigitado = prompt('Digite o nome do elemento no YAML:', nomeSugerido);
-    const nome = nomeDigitado?.trim() || nomeSugerido;
+    let nome = nomeDigitado?.trim() || nomeSugerido;
 
     if (!nomeDigitado?.trim()) {
       console.log(`ℹ️ Usando o nome sugerido: ${nome}`);
+    }
+
+    if (mapeamentos.has(nome)) {
+      const base = nome;
+      let sufixo = 2;
+      while (mapeamentos.has(`${base}_${sufixo}`)) sufixo++;
+      nome = `${base}_${sufixo}`;
+      console.log(`ℹ️ Nome repetido; usando: ${nome}`);
     }
 
     const xpath = gerarXPath(elemento);
     const texto = (elemento.innerText || elemento.textContent || '')
       .replace(/\s+/g, ' ')
       .trim();
-    // JSON.stringify produz strings entre aspas válidas para valores YAML.
-    const linhaYaml = [
-      `${JSON.stringify(nome)}:`,
-      `  locator: ${JSON.stringify(xpath)}`,
-      `  text: ${JSON.stringify(texto)}`,
-      `  type: ${JSON.stringify(elemento.localName)}`,
-    ].join('\n');
+    mapeamentos.set(nome, {
+      locator: xpath,
+      text: texto,
+      type: elemento.localName,
+    });
+    const conteudoYaml = gerarConteudoYaml();
 
     console.log('🎯 Elemento:', elemento);
-    console.log('📋 YAML:');
-    console.log(linhaYaml);
+    console.log(`📋 ${mapeamentos.size} elemento(s) acumulado(s). YAML atualizado:`);
+    console.log(conteudoYaml);
 
     try {
-      await navigator.clipboard.writeText(linhaYaml);
-      console.log('✅ Linha YAML copiada para a área de transferência.');
+      await navigator.clipboard.writeText(conteudoYaml);
+      console.log('✅ YAML completo copiado para a área de transferência.');
     } catch {
-      console.log('⚠️ Copie a linha YAML exibida acima manualmente.');
+      console.log('⚠️ Não foi possível copiar; o YAML completo está no console.');
     }
   }
 
@@ -222,7 +271,8 @@
   window.addEventListener('scroll', reposicionarDestaque, true);
   window.addEventListener('resize', reposicionarDestaque);
 
-  window.pararMapeamento = () => {
+  window.baixarMapeamentoYaml = baixarMapeamentoYaml;
+  window.pararMapeamento = (baixarArquivo = true) => {
     document.removeEventListener('pointermove', acompanharCursor, true);
     document.removeEventListener('click', selecionar, true);
     window.removeEventListener('scroll', reposicionarDestaque, true);
@@ -230,10 +280,12 @@
     blocoSelecao?.remove();
     blocoSelecao = null;
     elementoDestacado = null;
+    if (baixarArquivo) baixarMapeamentoYaml();
+    delete window.baixarMapeamentoYaml;
     delete window.pararMapeamento;
     console.log('🛑 Mapeamento encerrado.');
   };
 
   console.log('✅ Mapeamento ativo. Passe o cursor para destacar e clique no elemento desejado.');
-  console.log('Para encerrar, execute: pararMapeamento()');
+  console.log('Execute baixarMapeamentoYaml() para baixar sem encerrar ou pararMapeamento() para finalizar e baixar o YAML.');
 })();
