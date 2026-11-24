@@ -5,10 +5,16 @@
     if (!valor.includes("'")) return `'${valor}'`;
     if (!valor.includes('"')) return `"${valor}"`;
 
-    return `concat(${valor
-      .split("'")
-      .map(parte => `'${parte}'`)
-      .join(', "\\'", ')})`;
+    const partes = valor.split("'");
+    const argumentos = [];
+
+    partes.forEach((parte, indice) => {
+      if (parte) argumentos.push(`'${parte}'`);
+      if (indice < partes.length - 1) argumentos.push(`"'"`);
+    });
+
+    if (argumentos.length === 1) argumentos.push("''");
+    return `concat(${argumentos.join(', ')})`;
   }
 
   function xpathAbsoluto(elemento) {
