@@ -64,14 +64,24 @@
     return `concat(${argumentos.join(', ')})`;
   }
 
-  function contarXPath(xpath) {
-    return document.evaluate(
+  function xpathQueLocalizaElemento(xpath, elemento) {
+    const resultado = document.evaluate(
       xpath,
       document,
       null,
       XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
       null,
-    ).snapshotLength;
+    );
+
+    for (let indice = 0; indice < resultado.snapshotLength; indice++) {
+      if (resultado.snapshotItem(indice).isSameNode(elemento)) {
+        if (resultado.snapshotLength === 1) return xpath;
+        // Usa a posição entre seletores equivalentes em vez de encadear ancestrais.
+        return `xpath=(${xpath})[${indice + 1}]`;
+      }
+    }
+
+    return null;
   }
 
   function caminhoRelativo(ancora, elemento) {
@@ -117,7 +127,8 @@
       if (!valor) continue;
 
       const xpath = `//${tag}[@${atributo}=${literalXPath(valor)}]`;
-      if (contarXPath(xpath) === 1) return xpath;
+      const locator = xpathQueLocalizaElemento(xpath, elemento);
+      if (locator) return locator;
     }
 
     const texto = (elemento.innerText || elemento.textContent || '')
@@ -125,7 +136,8 @@
       .trim();
     if (texto) {
       const xpathTexto = `//${tag}[normalize-space(.)=${literalXPath(texto)}]`;
-      if (contarXPath(xpathTexto) === 1) return xpathTexto;
+      const locator = xpathQueLocalizaElemento(xpathTexto, elemento);
+      if (locator) return locator;
     }
 
     // Procura o ancestral mais próximo com atributo estável ou texto único.
@@ -139,7 +151,8 @@
 
           const xpathAncora = `//${ancora.localName}[@${atributo}=${literalXPath(valor)}]`;
           const xpathRelativo = `${xpathAncora}${caminho}`;
-          if (contarXPath(xpathRelativo) === 1) return xpathRelativo;
+          const locator = xpathQueLocalizaElemento(xpathRelativo, elemento);
+          if (locator) return locator;
         }
 
         const textoAncora = (ancora.innerText || ancora.textContent || '')
@@ -149,7 +162,8 @@
           const xpathTextoAncora =
             `//${ancora.localName}[normalize-space(.)=${literalXPath(textoAncora)}]`;
           const xpathRelativo = `${xpathTextoAncora}${caminho}`;
-          if (contarXPath(xpathRelativo) === 1) return xpathRelativo;
+          const locator = xpathQueLocalizaElemento(xpathRelativo, elemento);
+          if (locator) return locator;
         }
       }
       ancora = ancora.parentElement;
