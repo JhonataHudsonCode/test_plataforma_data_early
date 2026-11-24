@@ -75,9 +75,7 @@
 
     for (let indice = 0; indice < resultado.snapshotLength; indice++) {
       if (resultado.snapshotItem(indice).isSameNode(elemento)) {
-        if (resultado.snapshotLength === 1) return xpath;
-        // Usa a posição entre seletores equivalentes em vez de encadear ancestrais.
-        return `xpath=(${xpath})[${indice + 1}]`;
+        return xpath;
       }
     }
 
