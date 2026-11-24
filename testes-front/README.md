@@ -6,6 +6,8 @@ O script `mapear-elementos.js`, executado no Console do navegador, acumula os el
 
 Na geração do XPath, o script prioriza primeiro o texto com `contains(normalize-space(.), 'texto')`, mesmo se o elemento tiver `id`; atributos vêm depois como alternativa. O locator é salvo diretamente como `//...`, sem prefixo `xpath=` nem agrupamento extra. O fallback sem texto ou atributo parte de `//body`, nunca de `/html`.
 
+Para uma `div` que contenha `ul > li`, o texto dos itens da lista é removido dos campos `text` e do nome sugerido. Nessa situação, o locator prioriza `contains(@class, ...)` usando apenas a primeira classe do atributo `class` e combina o texto restante quando ele existir.
+
 No projeto Playwright que executa os testes, instale `yaml` caso ainda não esteja disponível:
 
 ```bash

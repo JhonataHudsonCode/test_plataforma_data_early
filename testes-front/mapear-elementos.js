@@ -82,6 +82,24 @@
     return null;
   }
 
+  function obterTextoDoElemento(elemento) {
+    const copia = elemento.localName === 'div' && elemento.querySelector('ul > li')
+      ? elemento.cloneNode(true)
+      : elemento;
+
+    if (copia !== elemento) {
+      copia.querySelectorAll('ul').forEach(lista => lista.remove());
+    }
+
+    return (copia.innerText || copia.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function primeiraClasse(elemento) {
+    return (elemento.getAttribute('class') || '').trim().split(/\s+/)[0] || '';
+  }
+
   function caminhoRelativo(ancora, elemento) {
     const partes = [];
     let atual = elemento;
@@ -109,9 +127,20 @@
 
   function gerarXPath(elemento) {
     const tag = elemento.localName;
-    const texto = (elemento.innerText || elemento.textContent || '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const texto = obterTextoDoElemento(elemento);
+
+    if (tag === 'div' && elemento.querySelector('ul > li')) {
+      const classe = primeiraClasse(elemento);
+      if (classe) {
+        const condicaoTexto = texto
+          ? ` and contains(normalize-space(.), ${literalXPath(texto)})`
+          : '';
+        const xpathClasse =
+          `//div[contains(@class, ${literalXPath(classe)})${condicaoTexto}]`;
+        const locator = xpathQueLocalizaElemento(xpathClasse, elemento);
+        if (locator) return locator;
+      }
+    }
 
     // Prefere o texto visível mesmo quando o elemento também possui id.
     if (texto) {
@@ -175,15 +204,14 @@
   }
 
   function gerarNomeSugerido(elemento) {
-    const texto = (elemento.innerText || elemento.textContent || '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const texto = obterTextoDoElemento(elemento);
     const identificador = texto ||
       elemento.getAttribute('aria-label') ||
       elemento.getAttribute('title') ||
       elemento.id ||
       elemento.getAttribute('data-testid') ||
-      elemento.getAttribute('data-test');
+      elemento.getAttribute('data-test') ||
+      primeiraClasse(elemento);
 
     if (!identificador) {
       sequenciaNomes++;
@@ -260,9 +288,7 @@
     }
 
     const xpath = gerarXPath(elemento);
-    const texto = (elemento.innerText || elemento.textContent || '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const texto = obterTextoDoElemento(elemento);
     mapeamentos.set(nome, {
       locator: xpath,
       text: texto,
