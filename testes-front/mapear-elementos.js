@@ -135,7 +135,7 @@
       .replace(/\s+/g, ' ')
       .trim();
     if (texto) {
-      const xpathTexto = `//${tag}[normalize-space(.)=${literalXPath(texto)}]`;
+      const xpathTexto = `//${tag}[contains(normalize-space(.), ${literalXPath(texto)})]`;
       const locator = xpathQueLocalizaElemento(xpathTexto, elemento);
       if (locator) return locator;
     }
