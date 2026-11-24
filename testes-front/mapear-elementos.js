@@ -245,23 +245,52 @@
     ].join('\n')).join('\n\n');
   }
 
+  function gerarConteudoNomesAssertions() {
+    return [...mapeamentos.keys()].map(nome => `${nome}:Assertions`).join('\n');
+  }
+
+  function gerarConteudoInstanciasAssertions() {
+    return [...mapeamentos.keys()]
+      .map(nome => `this.${nome} = new Assertions(page, this.elementos.${nome})`)
+      .join('\n');
+  }
+
+  function baixarArquivoTexto(nomeArquivo, conteudo, tipo) {
+    const arquivo = new Blob([conteudo], { type: tipo });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nomeArquivo;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function baixarMapeamentoYaml() {
     if (mapeamentos.size === 0) {
       console.log('⚠️ Nenhum elemento foi mapeado ainda.');
       return;
     }
+    baixarArquivoTexto('mapeamento.yml', gerarConteudoYaml(), 'text/yaml;charset=utf-8');
+    console.log(`✅ mapeamento.yml gerado com ${mapeamentos.size} elemento(s).`);
+  }
 
-    const conteudo = gerarConteudoYaml();
-    const arquivo = new Blob([conteudo], { type: 'text/yaml;charset=utf-8' });
-    const url = URL.createObjectURL(arquivo);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'mapeamento.yml';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    console.log(`✅ Arquivo ${link.download} gerado com ${mapeamentos.size} elemento(s).`);
+  function baixarArquivosMapeamento() {
+    if (mapeamentos.size === 0) {
+      console.log('⚠️ Nenhum elemento foi mapeado ainda.');
+      return;
+    }
+
+    const arquivos = [
+      ['mapeamento.yml', gerarConteudoYaml(), 'text/yaml;charset=utf-8'],
+      ['elementos_assertions.txt', gerarConteudoNomesAssertions(), 'text/plain;charset=utf-8'],
+      ['instancias_assertions.txt', gerarConteudoInstanciasAssertions(), 'text/plain;charset=utf-8'],
+    ];
+    arquivos.forEach(([nome, conteudo, tipo], indice) => {
+      window.setTimeout(() => baixarArquivoTexto(nome, conteudo, tipo), indice * 400);
+    });
+    console.log(`✅ Gerando os três arquivos com ${mapeamentos.size} elemento(s).`);
   }
 
   async function selecionar(evento) {
@@ -314,6 +343,7 @@
   window.addEventListener('resize', reposicionarDestaque);
 
   window.baixarMapeamentoYaml = baixarMapeamentoYaml;
+  window.baixarArquivosMapeamento = baixarArquivosMapeamento;
   window.pararMapeamento = (baixarArquivo = true) => {
     document.removeEventListener('pointermove', acompanharCursor, true);
     document.removeEventListener('click', selecionar, true);
@@ -322,12 +352,13 @@
     blocoSelecao?.remove();
     blocoSelecao = null;
     elementoDestacado = null;
-    if (baixarArquivo) baixarMapeamentoYaml();
+    if (baixarArquivo) baixarArquivosMapeamento();
     delete window.baixarMapeamentoYaml;
+    delete window.baixarArquivosMapeamento;
     delete window.pararMapeamento;
     console.log('🛑 Mapeamento encerrado.');
   };
 
   console.log('✅ Mapeamento ativo. Passe o cursor para destacar e clique no elemento desejado.');
-  console.log('Execute baixarMapeamentoYaml() para baixar sem encerrar ou pararMapeamento() para finalizar e baixar o YAML.');
+  console.log('Execute baixarArquivosMapeamento() para baixar os três arquivos ou pararMapeamento() para encerrar e baixá-los.');
 })();
