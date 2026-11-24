@@ -2,7 +2,7 @@
 
 `elementos_softwares.yml` mantém o catálogo de seletores, rótulos e tipos dos componentes. A classe `SoftwaresPage` carrega esse catálogo, resolve os locators do Playwright e centraliza as asserções de visibilidade.
 
-O script `mapear-elementos.js`, executado no Console do navegador, acumula os elementos clicados no formato YAML `locator`, `text` e `type`. Cada nome é uma chave no nível principal, sem `pagina` ou `elementos`. A cada seleção, ele copia o YAML completo atualizado para a área de transferência. Ao executar `pararMapeamento()`, encerra a seleção e baixa `mapeamento.yml`; também é possível executar `baixarMapeamentoYaml()` para baixar sem encerrar. O Page Object interpreta esses itens como XPath quando o campo `strategy` não está definido.
+O script `mapear-elementos.js`, executado no Console do navegador, acumula os elementos clicados no formato YAML `locator`, `text` e `type`. Cada nome é uma chave no nível principal, sem `pagina` ou `elementos`; o nome sugerido é derivado do texto visível quando houver, e os blocos são separados por uma linha em branco. A cada seleção, ele copia o YAML completo atualizado para a área de transferência. Ao executar `pararMapeamento()`, encerra a seleção e baixa `mapeamento.yml`; também é possível executar `baixarMapeamentoYaml()` para baixar sem encerrar. O Page Object interpreta esses itens como XPath quando o campo `strategy` não está definido.
 
 Na geração do XPath, o script prioriza atributos únicos (`id`, `data-testid`, `aria-label`, `title` e outros) e depois texto único. Se precisar de um caminho relativo, ancora-o em um ancestral; o fallback parte de `//body`, nunca de `/html`.
 

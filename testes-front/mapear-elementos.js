@@ -161,22 +161,36 @@
   }
 
   function gerarNomeSugerido(elemento) {
-    const identificador =
-      elemento.id ||
-      elemento.getAttribute('data-testid') ||
-      elemento.getAttribute('data-test') ||
+    const texto = (elemento.innerText || elemento.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const identificador = texto ||
       elemento.getAttribute('aria-label') ||
       elemento.getAttribute('title') ||
-      elemento.localName;
-    const base = identificador
+      elemento.id ||
+      elemento.getAttribute('data-testid') ||
+      elemento.getAttribute('data-test');
+
+    if (!identificador) {
+      sequenciaNomes++;
+      return `elemento_${sequenciaNomes}`;
+    }
+
+    const palavras = identificador
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9_-]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .toLowerCase() || 'elemento';
+      .match(/[a-zA-Z0-9]+/g) || [];
+    const base = palavras
+      .map((palavra, indice) => {
+        const normalizada = palavra.toLowerCase();
+        return indice === 0
+          ? normalizada
+          : normalizada.charAt(0).toUpperCase() + normalizada.slice(1);
+      })
+      .join('') || 'elemento';
 
     sequenciaNomes++;
-    return `${base}_${sequenciaNomes}`;
+    return base;
   }
 
   function gerarConteudoYaml() {
@@ -185,7 +199,7 @@
       `  locator: ${JSON.stringify(elemento.locator)}`,
       `  text: ${JSON.stringify(elemento.text)}`,
       `  type: ${JSON.stringify(elemento.type)}`,
-    ].join('\n')).join('\n');
+    ].join('\n')).join('\n\n');
   }
 
   function baixarMapeamentoYaml() {
