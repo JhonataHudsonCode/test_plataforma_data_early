@@ -111,6 +111,17 @@
 
   function gerarXPath(elemento) {
     const tag = elemento.localName;
+    const texto = (elemento.innerText || elemento.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Prefere o texto visível mesmo quando o elemento também possui id.
+    if (texto) {
+      const xpathTexto = `//${tag}[contains(normalize-space(.), ${literalXPath(texto)})]`;
+      const locator = xpathQueLocalizaElemento(xpathTexto, elemento);
+      if (locator) return locator;
+    }
+
     const atributos = [
       'id',
       'data-testid',
@@ -128,15 +139,6 @@
 
       const xpath = `//${tag}[@${atributo}=${literalXPath(valor)}]`;
       const locator = xpathQueLocalizaElemento(xpath, elemento);
-      if (locator) return locator;
-    }
-
-    const texto = (elemento.innerText || elemento.textContent || '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (texto) {
-      const xpathTexto = `//${tag}[contains(normalize-space(.), ${literalXPath(texto)})]`;
-      const locator = xpathQueLocalizaElemento(xpathTexto, elemento);
       if (locator) return locator;
     }
 
